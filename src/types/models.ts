@@ -107,7 +107,13 @@ export interface WeekSchedule {
   clientGroups?: Record<string, string>;
 }
 
-export interface Workspace {
+export interface SavedSchedule {
+  id: string;
+  name: string;
+  savedAt: string; // ISO timestamp
+  schedule: WeekSchedule;
+}
+
   version: 1;
   worker: WorkerProfile;
   clients: Client[];
