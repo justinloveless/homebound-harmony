@@ -114,12 +114,14 @@ export interface SavedSchedule {
   schedule: WeekSchedule;
 }
 
+export interface Workspace {
   version: 1;
   worker: WorkerProfile;
   clients: Client[];
   travelTimes: TravelTimeMatrix;
   travelTimeErrors?: TravelTimeErrors;
   lastSchedule: WeekSchedule | null;
+  savedSchedules?: SavedSchedule[];
 }
 
 export const DEFAULT_WORKSPACE: Workspace = {
