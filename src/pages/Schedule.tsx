@@ -177,7 +177,7 @@ export default function Schedule() {
                       {unscheduledClients.map(c => (
                         <div key={c.id} className="text-xs flex items-center justify-between">
                           <span className="truncate">{c.name}</span>
-                          <Badge variant="outline" className="text-[10px] shrink-0">{c.frequency}</Badge>
+                          <Badge variant="outline" className="text-[10px] shrink-0">{c.visitsPerPeriod}x {PERIOD_LABELS[c.period]}</Badge>
                         </div>
                       ))}
                     </div>
