@@ -339,7 +339,15 @@ export default function Schedule() {
                           {/* Day header (sticky) */}
                           <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
                             {DAY_LABELS[day]}
-                            {daySchedule && <span className="text-[10px] font-normal text-muted-foreground ml-1">({daySchedule.visits.length})</span>}
+                            {daySchedule && (
+                              <div className="text-[9px] font-normal text-muted-foreground leading-tight">
+                                {daySchedule.visits.length} visits · {daySchedule.totalTravelMinutes}m
+                                {(() => {
+                                  const mi = daySchedule.visits.reduce((s, v) => s + (v.travelDistanceMiFromPrev ?? 0), 0);
+                                  return mi > 0 ? ` · ${mi.toFixed(1)}mi` : '';
+                                })()}
+                              </div>
+                            )}
                           </div>
 
                           {/* Hour grid lines */}
