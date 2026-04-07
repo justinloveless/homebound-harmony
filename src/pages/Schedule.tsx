@@ -376,6 +376,87 @@ export default function Schedule() {
     return clients.filter(c => !onDay.has(c.id));
   }, [selectedDay, lastSchedule, clients]);
 
+  // Clients available for the popup day
+  const availableForPopupDay = useMemo(() => {
+    if (!newEventPopup || !lastSchedule) return clients;
+    const daySchedule = lastSchedule.days.find(d => d.day === newEventPopup.day);
+    const onDay = new Set(daySchedule?.visits.map(v => v.clientId) ?? []);
+    return clients.filter(c => !onDay.has(c.id));
+  }, [newEventPopup?.day, lastSchedule, clients]);
+
+  /** Handle clicking on the weekly calendar to add a new event */
+  const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, minHeight: number) => {
+    // Don't open popup if clicking on an existing event
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-event-block]')) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const yOffset = e.clientY - rect.top + (calendarScrollRef.current?.scrollTop ?? 0);
+    const totalMinutes = yOffset / minHeight;
+    // Round to nearest 15-min block
+    const roundedMinutes = Math.round(totalMinutes / 15) * 15;
+    const clampedMinutes = Math.max(0, Math.min(roundedMinutes, 24 * 60 - 15));
+    const hours = Math.floor(clampedMinutes / 60);
+    const mins = clampedMinutes % 60;
+    const startTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+
+    setNewEventPopup({
+      day,
+      startTime,
+      duration: 60, // default 1 hour
+      clientId: '',
+      x: e.clientX,
+      y: e.clientY,
+    });
+  };
+
+  /** Confirm adding the new event from the popup */
+  const handleConfirmNewEvent = () => {
+    if (!newEventPopup || !newEventPopup.clientId || !lastSchedule) return;
+    const client = clients.find(c => c.id === newEventPopup.clientId);
+    if (!client) return;
+
+    const existingDay = lastSchedule.days.find(d => d.day === newEventPopup.day);
+    const existingVisits = existingDay ? [...existingDay.visits] : [];
+
+    // Parse start time
+    const [sh, sm] = newEventPopup.startTime.split(':').map(Number);
+    const startMin = sh * 60 + sm;
+    const endMin = startMin + newEventPopup.duration;
+    const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+    // Insert the visit at the correct position based on start time
+    const newVisit: ScheduledVisit = {
+      clientId: newEventPopup.clientId,
+      startTime: toTime(startMin),
+      endTime: toTime(endMin),
+      travelTimeFromPrev: 0,
+    };
+
+    // Find insertion index (sorted by start time)
+    let insertIdx = existingVisits.length;
+    for (let i = 0; i < existingVisits.length; i++) {
+      const vStart = existingVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+      if (startMin < vStart) {
+        insertIdx = i;
+        break;
+      }
+    }
+    existingVisits.splice(insertIdx, 0, newVisit);
+
+    const date = existingDay?.date ?? (() => {
+      const dayIndex = DAYS_OF_WEEK.indexOf(newEventPopup.day);
+      const dateObj = new Date(lastSchedule.weekStartDate);
+      dateObj.setDate(dateObj.getDate() + dayIndex);
+      return dateObj.toISOString().split('T')[0];
+    })();
+
+    const recalced = recalcDaySchedule(existingVisits, newEventPopup.day, date, worker, clients, travelTimes);
+    updateDayInSchedule(recalced, newEventPopup.day);
+    toast.success(`${client.name} added to ${DAY_LABELS[newEventPopup.day]}`);
+    setNewEventPopup(null);
+  };
+
   return (
     <div className="space-y-6 max-w-5xl">
       <div className="flex items-center justify-between flex-wrap gap-3">
