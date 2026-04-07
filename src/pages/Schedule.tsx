@@ -281,44 +281,141 @@ export default function Schedule() {
           </TabsList>
 
           <TabsContent value="weekly" className="space-y-4 mt-4">
-            <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden border">
-              {DAYS_OF_WEEK.map(day => {
-                const daySchedule = lastSchedule.days.find(d => d.day === day);
-                const isDayOff = worker.daysOff.includes(day);
-                return (
-                  <div key={day} className={`flex flex-col min-h-[180px] ${isDayOff ? 'bg-muted/40' : 'bg-card'}`}>
-                    <div className={`px-2 py-1.5 border-b text-center ${isDayOff ? 'bg-muted/60' : 'bg-muted/30'}`}>
-                      <p className="text-xs font-semibold">{DAY_LABELS[day]}</p>
-                      {daySchedule && (
-                        <p className="text-[10px] text-muted-foreground">{daySchedule.visits.length} visits</p>
-                      )}
-                    </div>
-                    <div className="flex-1 p-1.5 space-y-1 overflow-y-auto">
-                      {isDayOff && !daySchedule && (
-                        <p className="text-[10px] text-muted-foreground text-center mt-4 italic">Day off</p>
-                      )}
-                      {daySchedule?.visits.map((v, i) => {
-                        const client = clients.find(c => c.id === v.clientId);
-                        return (
-                          <div key={i}
-                            className="rounded px-1.5 py-1 bg-primary/10 cursor-pointer hover:bg-primary/20 transition-colors"
-                            onClick={() => { setSelectedDay(day); }}
-                          >
-                            <p className="text-[11px] font-medium truncate">{client?.name}</p>
-                            <p className="text-[10px] text-muted-foreground">{formatTime(v.startTime)}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {daySchedule && (
-                      <div className="px-1.5 py-1 border-t text-[10px] text-muted-foreground text-center">
-                        {daySchedule.totalTravelMinutes}m · {formatTime(daySchedule.leaveHomeTime)}–{formatTime(daySchedule.arriveHomeTime)}
-                      </div>
-                    )}
+            {(() => {
+              // Timeline calendar: 24h vertical axis, 7 day columns
+              const HOUR_HEIGHT = 48; // px per hour
+              const TOTAL_HEIGHT = 24 * HOUR_HEIGHT;
+              const MIN_HEIGHT = TOTAL_HEIGHT / (24 * 60); // px per minute
+              const hours = Array.from({ length: 24 }, (_, i) => i);
+
+              return (
+                <div className="border rounded-lg overflow-hidden bg-card">
+                  {/* Legend */}
+                  <div className="flex items-center gap-4 px-3 py-2 border-b bg-muted/30 text-[10px] text-muted-foreground">
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary/20 border border-primary/30" /> Travel</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary border border-primary" /> Visit</span>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="flex overflow-x-auto">
+                    {/* Time labels column */}
+                    <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: TOTAL_HEIGHT }}>
+                      {hours.map(h => (
+                        <div key={h} className="border-b border-border/50 text-[10px] text-muted-foreground text-right pr-1.5 pt-0.5" style={{ height: HOUR_HEIGHT }}>
+                          {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Day columns */}
+                    {DAYS_OF_WEEK.map(day => {
+                      const daySchedule = lastSchedule.days.find(d => d.day === day);
+                      const isDayOff = worker.daysOff.includes(day);
+
+                      // Working hours background
+                      const whStart = worker.workingHours.startTime.split(':').map(Number);
+                      const whEnd = worker.workingHours.endTime.split(':').map(Number);
+                      const whStartMin = whStart[0] * 60 + whStart[1];
+                      const whEndMin = whEnd[0] * 60 + whEnd[1];
+
+                      return (
+                        <div key={day} className="flex-1 min-w-[100px] border-r last:border-r-0 relative" style={{ height: TOTAL_HEIGHT }}>
+                          {/* Day header (sticky) */}
+                          <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
+                            {DAY_LABELS[day]}
+                            {daySchedule && <span className="text-[10px] font-normal text-muted-foreground ml-1">({daySchedule.visits.length})</span>}
+                          </div>
+
+                          {/* Hour grid lines */}
+                          {hours.map(h => (
+                            <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: h * HOUR_HEIGHT, height: HOUR_HEIGHT }} />
+                          ))}
+
+                          {/* Working hours background */}
+                          {!isDayOff && (
+                            <div className="absolute left-0 right-0 bg-primary/[0.03]"
+                              style={{ top: whStartMin * MIN_HEIGHT, height: (whEndMin - whStartMin) * MIN_HEIGHT }} />
+                          )}
+
+                          {/* Break shading */}
+                          {!isDayOff && worker.breaks.map((b, bi) => {
+                            const bs = b.startTime.split(':').map(Number);
+                            const be = b.endTime.split(':').map(Number);
+                            const bStartMin = bs[0] * 60 + bs[1];
+                            const bEndMin = be[0] * 60 + be[1];
+                            return (
+                              <div key={bi} className="absolute left-0 right-0 bg-muted/40 border-y border-dashed border-muted-foreground/20"
+                                style={{ top: bStartMin * MIN_HEIGHT, height: (bEndMin - bStartMin) * MIN_HEIGHT }}>
+                                <span className="text-[8px] text-muted-foreground px-0.5 truncate block">{b.label}</span>
+                              </div>
+                            );
+                          })}
+
+                          {/* Visits + travel blocks */}
+                          {daySchedule?.visits.map((v, i) => {
+                            const client = clients.find(c => c.id === v.clientId);
+                            const startMin = v.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+                            const endMin = v.endTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+                            const visitDuration = endMin - startMin;
+                            const travelStart = startMin - v.travelTimeFromPrev;
+
+                            return (
+                              <React.Fragment key={i}>
+                                {/* Travel block */}
+                                {v.travelTimeFromPrev > 0 && (
+                                  <div
+                                    className="absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer"
+                                    style={{ top: travelStart * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
+                                    onClick={() => setSelectedDay(day)}
+                                    title={`${v.travelTimeFromPrev} min drive`}
+                                  >
+                                    {v.travelTimeFromPrev >= 15 && (
+                                      <span className="text-[8px] text-accent-foreground/70 px-1 truncate block">{v.travelTimeFromPrev}m</span>
+                                    )}
+                                  </div>
+                                )}
+                                {/* Visit block */}
+                                <div
+                                  className="absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden cursor-pointer hover:brightness-110 transition-all"
+                                  style={{ top: startMin * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
+                                  onClick={() => setSelectedDay(day)}
+                                  title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)}`}
+                                >
+                                  <div className="px-1 py-0.5">
+                                    <p className="text-[10px] font-medium truncate">{client?.name}</p>
+                                    {visitDuration >= 20 && (
+                                      <p className="text-[8px] opacity-80">{formatTime(v.startTime)}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              </React.Fragment>
+                            );
+                          })}
+
+                          {/* Travel home block (last leg) */}
+                          {daySchedule && daySchedule.visits.length > 0 && (() => {
+                            const lastVisit = daySchedule.visits[daySchedule.visits.length - 1];
+                            const lastEndMin = lastVisit.endTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+                            const arriveMin = daySchedule.arriveHomeTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+                            const travelHomeMin = arriveMin - lastEndMin;
+                            if (travelHomeMin <= 0) return null;
+                            return (
+                              <div
+                                className="absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden"
+                                style={{ top: lastEndMin * MIN_HEIGHT, height: Math.max(travelHomeMin * MIN_HEIGHT, 2) }}
+                                title={`${travelHomeMin} min drive home`}
+                              >
+                                {travelHomeMin >= 15 && (
+                                  <span className="text-[8px] text-accent-foreground/70 px-1 truncate block">{travelHomeMin}m 🏠</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             <Card>
               <CardContent className="pt-5">
