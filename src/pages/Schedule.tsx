@@ -9,6 +9,7 @@ import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek } from '@/types
 import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
+import { formatTime } from '@/lib/format-time';
 
 function getMonday(): string {
   const d = new Date();
