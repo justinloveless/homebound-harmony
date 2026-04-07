@@ -247,6 +247,7 @@ export default function Schedule() {
 
                 <RouteMap
                   workerAddress={worker.homeAddress}
+                  workerCoords={worker.homeCoords}
                   visits={selectedDaySchedule.visits}
                   clients={clients}
                 />
