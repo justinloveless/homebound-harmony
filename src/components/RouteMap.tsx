@@ -70,13 +70,18 @@ export default function RouteMap({ workerAddress, workerCoords, visits, clients 
         });
         renderer.setDirections(result);
 
-        // Add info windows for each stop
+        // Add home marker at start
         const route = result.routes[0];
+        if (route?.legs?.[0]?.start_location) {
+          new g.maps.Marker({
+            position: route.legs[0].start_location,
+            map,
+            label: { text: '🏠', fontSize: '18px' },
+            title: 'Home',
+          });
+        }
+        // Add numbered stop markers
         if (route?.legs) {
-          route.legs.forEach((leg, i) => {
-            if (i === 0) {
-              // Home start marker info
-            }
             if (i < visits.length) {
               const visit = visits[i];
               const client = visitClients[i];
