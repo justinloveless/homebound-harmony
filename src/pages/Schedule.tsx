@@ -407,31 +407,46 @@ export default function Schedule() {
     const startTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 
     setEventPopup({
+      mode: 'new',
       day,
       startTime,
-      duration: 60, // default 1 hour
+      duration: 60,
       clientId: '',
       x: e.clientX,
       y: e.clientY,
     });
   };
 
-  /** Confirm adding the new event from the popup */
+  /** Open edit popup for an existing visit */
+  const handleEditVisit = (e: React.MouseEvent, day: DayOfWeek, visitIndex: number, visit: ScheduledVisit) => {
+    e.stopPropagation();
+    const client = clients.find(c => c.id === visit.clientId);
+    const startMin = visit.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+    const endMin = visit.endTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+    setEventPopup({
+      mode: 'edit',
+      day,
+      startTime: visit.startTime,
+      duration: endMin - startMin,
+      clientId: visit.clientId,
+      originalDay: day,
+      originalIndex: visitIndex,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  };
+
+  /** Confirm adding or editing an event from the popup */
   const handleConfirmEvent = () => {
     if (!eventPopup || !eventPopup.clientId || !lastSchedule) return;
     const client = clients.find(c => c.id === eventPopup.clientId);
     if (!client) return;
 
-    const existingDay = lastSchedule.days.find(d => d.day === eventPopup.day);
-    const existingVisits = existingDay ? [...existingDay.visits] : [];
-
-    // Parse start time
     const [sh, sm] = eventPopup.startTime.split(':').map(Number);
     const startMin = sh * 60 + sm;
     const endMin = startMin + eventPopup.duration;
     const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
-    // Insert the visit at the correct position based on start time
     const newVisit: ScheduledVisit = {
       clientId: eventPopup.clientId,
       startTime: toTime(startMin),
@@ -439,27 +454,79 @@ export default function Schedule() {
       travelTimeFromPrev: 0,
     };
 
-    // Find insertion index (sorted by start time)
-    let insertIdx = existingVisits.length;
-    for (let i = 0; i < existingVisits.length; i++) {
-      const vStart = existingVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
-      if (startMin < vStart) {
-        insertIdx = i;
-        break;
+    // If editing, first remove the old visit from its original day
+    if (eventPopup.mode === 'edit' && eventPopup.originalDay != null && eventPopup.originalIndex != null) {
+      const origDaySchedule = lastSchedule.days.find(d => d.day === eventPopup.originalDay);
+      if (origDaySchedule) {
+        const remainingVisits = origDaySchedule.visits.filter((_, idx) => idx !== eventPopup.originalIndex);
+        if (eventPopup.originalDay === eventPopup.day) {
+          // Same day: remove old, insert new at correct position
+          let insertIdx = remainingVisits.length;
+          for (let i = 0; i < remainingVisits.length; i++) {
+            const vStart = remainingVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+            if (startMin < vStart) { insertIdx = i; break; }
+          }
+          remainingVisits.splice(insertIdx, 0, newVisit);
+          const date = origDaySchedule.date;
+          const recalced = recalcDaySchedule(remainingVisits, eventPopup.day, date, worker, clients, travelTimes);
+          updateDayInSchedule(recalced, eventPopup.day);
+          toast.success(`${client.name} updated on ${DAY_LABELS[eventPopup.day]}`);
+          setEventPopup(null);
+          return;
+        } else {
+          // Different day: remove from original day first
+          if (remainingVisits.length === 0) {
+            // Remove the day entirely — update inline
+            const newDays = lastSchedule.days.filter(d => d.day !== eventPopup.originalDay);
+            const totalTravel = newDays.reduce((s, d) => s + d.totalTravelMinutes, 0);
+            const totalAway = newDays.reduce((s, d) => {
+              const leave = d.leaveHomeTime.split(':').map(Number);
+              const arrive = d.arriveHomeTime.split(':').map(Number);
+              return s + ((arrive[0] * 60 + arrive[1]) - (leave[0] * 60 + leave[1]));
+            }, 0);
+            setSchedule({ ...lastSchedule, days: newDays, totalTravelMinutes: totalTravel, totalTimeAwayMinutes: totalAway });
+          } else {
+            const recalced = recalcDaySchedule(remainingVisits, eventPopup.originalDay, origDaySchedule.date, worker, clients, travelTimes);
+            updateDayInSchedule(recalced, eventPopup.originalDay);
+          }
+        }
       }
     }
-    existingVisits.splice(insertIdx, 0, newVisit);
 
-    const date = existingDay?.date ?? (() => {
+    // Add to target day
+    // Re-read schedule state after potential removal above (use setTimeout to let state settle)
+    // For simplicity, we add directly to the current schedule
+    const targetDay = lastSchedule.days.find(d => d.day === eventPopup.day);
+    const targetVisits = targetDay ? [...targetDay.visits] : [];
+
+    // For edit mode moving to different day, the removal happened above but state hasn't updated yet.
+    // We work off the current visits and add.
+    let insertIdx = targetVisits.length;
+    for (let i = 0; i < targetVisits.length; i++) {
+      const vStart = targetVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+      if (startMin < vStart) { insertIdx = i; break; }
+    }
+    targetVisits.splice(insertIdx, 0, newVisit);
+
+    const date = targetDay?.date ?? (() => {
       const dayIndex = DAYS_OF_WEEK.indexOf(eventPopup.day);
       const dateObj = new Date(lastSchedule.weekStartDate);
       dateObj.setDate(dateObj.getDate() + dayIndex);
       return dateObj.toISOString().split('T')[0];
     })();
 
-    const recalced = recalcDaySchedule(existingVisits, eventPopup.day, date, worker, clients, travelTimes);
+    const recalced = recalcDaySchedule(targetVisits, eventPopup.day, date, worker, clients, travelTimes);
     updateDayInSchedule(recalced, eventPopup.day);
-    toast.success(`${client.name} added to ${DAY_LABELS[eventPopup.day]}`);
+    toast.success(eventPopup.mode === 'edit' ? `${client.name} moved to ${DAY_LABELS[eventPopup.day]}` : `${client.name} added to ${DAY_LABELS[eventPopup.day]}`);
+    setEventPopup(null);
+  };
+
+  /** Delete visit from the edit popup */
+  const handleDeleteFromPopup = () => {
+    if (!eventPopup || eventPopup.mode !== 'edit' || !lastSchedule || eventPopup.originalDay == null || eventPopup.originalIndex == null) return;
+    const daySchedule = lastSchedule.days.find(d => d.day === eventPopup.originalDay);
+    if (!daySchedule) return;
+    removeVisit(daySchedule, eventPopup.originalIndex);
     setEventPopup(null);
   };
 
