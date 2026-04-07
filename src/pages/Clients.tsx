@@ -187,20 +187,25 @@ function ClientForm({ client, onSave, onCancel }: { client: Client; onSave: (c: 
           <AddressSearch id="address" value={form.address} onChange={(address, coords) => setForm({ ...form, address, coords: coords ?? form.coords })} />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <div>
           <Label>Duration (min)</Label>
           <Input type="number" value={form.visitDurationMinutes} min={15} step={15}
             onChange={e => setForm({ ...form, visitDurationMinutes: Number(e.target.value) })} />
         </div>
         <div>
-          <Label>Frequency</Label>
-          <Select value={form.frequency} onValueChange={(v: Frequency) => setForm({ ...form, frequency: v })}>
+          <Label>Visits</Label>
+          <Input type="number" value={form.visitsPerPeriod} min={1} max={7}
+            onChange={e => setForm({ ...form, visitsPerPeriod: Number(e.target.value) })} />
+        </div>
+        <div>
+          <Label>Period</Label>
+          <Select value={form.period} onValueChange={(v: SchedulePeriod) => setForm({ ...form, period: v })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="weekly">Weekly</SelectItem>
-              <SelectItem value="biweekly">Biweekly</SelectItem>
-              <SelectItem value="monthly">Monthly</SelectItem>
+              <SelectItem value="week">Per week</SelectItem>
+              <SelectItem value="2weeks">Per 2 weeks</SelectItem>
+              <SelectItem value="month">Per month</SelectItem>
             </SelectContent>
           </Select>
         </div>
