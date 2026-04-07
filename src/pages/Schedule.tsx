@@ -842,7 +842,7 @@ export default function Schedule() {
                                   data-event-block
                                   className="absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden cursor-pointer hover:brightness-110 transition-all"
                                   style={{ top: startMin * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
-                                  onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
+                                  onClick={(e) => handleEditVisit(e, day, i, v)}
                                   title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)}`}
                                 >
                                   <div className="px-1 py-0.5">
