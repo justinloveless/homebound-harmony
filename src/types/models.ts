@@ -40,10 +40,8 @@ export interface WorkerProfile {
   workingHours: { startTime: string; endTime: string };
   daysOff: DayOfWeek[];
   breaks: { startTime: string; endTime: string; label: string }[];
-}
-  daysOff: DayOfWeek[];
-  breaks: { startTime: string; endTime: string; label: string }[];
-}
+
+
 
 // Travel time in minutes between two location IDs
 // Key format: "locA_id|locB_id" (sorted alphabetically so it's bidirectional)
