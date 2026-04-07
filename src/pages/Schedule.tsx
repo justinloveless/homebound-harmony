@@ -96,7 +96,7 @@ export default function Schedule() {
                   <CardContent>
                     <div className="flex gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {day.totalTravelMinutes}m travel</span>
-                      <span>{day.leaveHomeTime} – {day.arriveHomeTime}</span>
+                      <span>{formatTime(day.leaveHomeTime)} – {formatTime(day.arriveHomeTime)}</span>
                     </div>
                     <div className="mt-2 space-y-1">
                       {day.visits.map((v, i) => {
