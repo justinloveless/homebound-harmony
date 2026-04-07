@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import { DEFAULT_WORKSPACE, type Workspace } from '@/types/models';
+import { DEFAULT_WORKSPACE, type Workspace, frequencyToVisits } from '@/types/models';
 
 const DB_NAME = 'home-health-scheduler';
 const STORE_NAME = 'workspace';
@@ -20,10 +20,24 @@ function getDB() {
   return dbPromise;
 }
 
+/** Migrate legacy clients with frequency field to new visitsPerPeriod format */
+function migrateWorkspace(ws: Workspace): Workspace {
+  const clients = ws.clients.map(c => {
+    if (c.visitsPerPeriod != null && c.period != null) return c;
+    const freq = (c as any).frequency;
+    if (freq) {
+      const { visitsPerPeriod, period } = frequencyToVisits(freq);
+      return { ...c, visitsPerPeriod, period };
+    }
+    return { ...c, visitsPerPeriod: 1, period: 'week' as const };
+  });
+  return { ...ws, clients };
+}
+
 export async function loadWorkspace(): Promise<Workspace> {
   const db = await getDB();
   const data = await db.get(STORE_NAME, WORKSPACE_KEY);
-  return data ?? { ...DEFAULT_WORKSPACE };
+  return migrateWorkspace(data ?? { ...DEFAULT_WORKSPACE });
 }
 
 export async function saveWorkspace(ws: Workspace): Promise<void> {
