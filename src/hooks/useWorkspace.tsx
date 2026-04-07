@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { loadWorkspace, saveWorkspace } from '@/lib/storage';
-import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type WeekSchedule, DEFAULT_WORKSPACE } from '@/types/models';
+import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type WeekSchedule, DEFAULT_WORKSPACE, travelKey, estimateTravelMinutes, type Coords } from '@/types/models';
 
 interface WorkspaceContextValue {
   workspace: Workspace;
