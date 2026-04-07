@@ -6,11 +6,12 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { generateWeekSchedule, recalcDaySchedule } from '@/lib/scheduler';
-import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek, type WeekSchedule, type DaySchedule } from '@/types/models';
-import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
+import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek, type WeekSchedule, type DaySchedule, type ScheduledVisit } from '@/types/models';
+import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
+import { getTimeDependentTravelTimes } from '@/lib/google-maps';
 
 function getMonday(): string {
   const d = new Date();
@@ -23,6 +24,8 @@ export default function Schedule() {
   const { workspace, setSchedule } = useWorkspace();
   const { worker, clients, travelTimes, lastSchedule } = workspace;
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
+  const [refining, setRefining] = useState(false);
+  const [refineProgress, setRefineProgress] = useState('');
 
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
@@ -37,11 +40,119 @@ export default function Schedule() {
 
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
 
-  const handleGenerate = () => {
+  /** Refine a schedule's travel times using Google Maps with departure times */
+  const refineWithGoogle = async (schedule: WeekSchedule) => {
+    setRefining(true);
+    const refinedDays = [...schedule.days];
+
+    try {
+      for (let di = 0; di < refinedDays.length; di++) {
+        const day = refinedDays[di];
+        setRefineProgress(`Refining ${DAY_LABELS[day.day]} (${di + 1}/${refinedDays.length})...`);
+
+        // Build ordered address list: home → clients → home
+        const addresses: string[] = [worker.homeAddress];
+        const visitClients = day.visits.map(v => clients.find(c => c.id === v.clientId)).filter(Boolean);
+        for (const c of visitClients) {
+          if (c) addresses.push(c.address);
+        }
+        addresses.push(worker.homeAddress); // return home
+
+        // Build departure time from schedule date + leave time
+        const departureDate = new Date(`${day.date}T${day.leaveHomeTime}:00`);
+
+        const { durationInTraffic } = await getTimeDependentTravelTimes(
+          addresses,
+          departureDate,
+          (msg) => setRefineProgress(`${DAY_LABELS[day.day]}: ${msg}`),
+        );
+
+        // Rebuild the day schedule with refined travel times
+        const workStart = worker.workingHours.startTime.split(':').map(Number);
+        const workStartMin = workStart[0] * 60 + workStart[1];
+        let currentTime = workStartMin;
+        const refinedVisits: ScheduledVisit[] = [];
+
+        for (let i = 0; i < day.visits.length; i++) {
+          const visit = day.visits[i];
+          const client = clients.find(c => c.id === visit.clientId);
+          if (!client) continue;
+
+          const travelMin = durationInTraffic[i] ?? visit.travelTimeFromPrev;
+          const windowStart = (() => {
+            const tw = client.timeWindows.find(tw => tw.day === day.day);
+            return tw ? tw.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) : workStartMin;
+          })();
+
+          let arrival = Math.max(currentTime + travelMin, windowStart);
+
+          // Skip over breaks
+          for (const b of worker.breaks) {
+            const bs = b.startTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
+            const be = b.endTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
+            if (arrival < be && arrival + client.visitDurationMinutes > bs) {
+              arrival = be;
+            }
+          }
+
+          const endMin = arrival + client.visitDurationMinutes;
+          const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+          refinedVisits.push({
+            clientId: visit.clientId,
+            startTime: toTime(arrival),
+            endTime: toTime(endMin),
+            travelTimeFromPrev: travelMin,
+          });
+
+          currentTime = endMin;
+        }
+
+        // Travel home (last leg)
+        const travelHome = durationInTraffic[day.visits.length] ?? (() => {
+          const lastId = day.visits[day.visits.length - 1]?.clientId ?? 'home';
+          return travelTimes[`${['home', lastId].sort().join('|')}`] ?? 15;
+        })();
+
+        const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        const totalTravel = refinedVisits.reduce((s, v) => s + v.travelTimeFromPrev, 0) + travelHome;
+
+        refinedDays[di] = {
+          ...day,
+          visits: refinedVisits,
+          totalTravelMinutes: totalTravel,
+          leaveHomeTime: refinedVisits.length > 0
+            ? toTime(refinedVisits[0].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) - refinedVisits[0].travelTimeFromPrev)
+            : day.leaveHomeTime,
+          arriveHomeTime: toTime(currentTime + travelHome),
+        };
+      }
+
+      const totalTravel = refinedDays.reduce((s, d) => s + d.totalTravelMinutes, 0);
+      const totalAway = refinedDays.reduce((s, d) => {
+        const leave = d.leaveHomeTime.split(':').map(Number);
+        const arrive = d.arriveHomeTime.split(':').map(Number);
+        return s + ((arrive[0] * 60 + arrive[1]) - (leave[0] * 60 + leave[1]));
+      }, 0);
+
+      const refined: WeekSchedule = { ...schedule, days: refinedDays, totalTravelMinutes: totalTravel, totalTimeAwayMinutes: totalAway };
+      setSchedule(refined);
+      toast.success(`Travel times refined with Google Maps traffic data`);
+    } catch (err) {
+      console.error('Refine failed:', err);
+      toast.error('Failed to refine travel times with Google Maps');
+    } finally {
+      setRefining(false);
+      setRefineProgress('');
+    }
+  };
+
+  const handleGenerate = async () => {
     const weekStart = getMonday();
     const schedule = generateWeekSchedule(worker, clients, travelTimes, weekStart);
     setSchedule(schedule);
-    toast.success(`Schedule generated: ${schedule.days.length} days, ${schedule.totalTravelMinutes} min total travel`);
+    toast.success(`Schedule generated — refining with Google Maps...`);
+    await refineWithGoogle(schedule);
   };
 
   const selectedDaySchedule = lastSchedule?.days.find(d => d.day === selectedDay);
@@ -136,14 +247,19 @@ export default function Schedule() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Schedule</h1>
           <p className="text-sm text-muted-foreground">
-            {lastSchedule
-              ? `Week of ${lastSchedule.weekStartDate} • ${lastSchedule.totalTravelMinutes} min total travel`
-              : 'Generate an optimized weekly schedule'}
+            {refining
+              ? refineProgress
+              : lastSchedule
+                ? `Week of ${lastSchedule.weekStartDate} • ${lastSchedule.totalTravelMinutes} min total travel`
+                : 'Generate an optimized weekly schedule'}
           </p>
         </div>
-        <Button onClick={handleGenerate} disabled={!canGenerate}>
-          <RotateCw className="w-4 h-4 mr-2" />
-          {lastSchedule ? 'Regenerate' : 'Generate Schedule'}
+        <Button onClick={handleGenerate} disabled={!canGenerate || refining}>
+          {refining ? (
+            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</>
+          ) : (
+            <><RotateCw className="w-4 h-4 mr-2" /> {lastSchedule ? 'Regenerate' : 'Generate Schedule'}</>
+          )}
         </Button>
       </div>
 

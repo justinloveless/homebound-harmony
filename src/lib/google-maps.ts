@@ -233,3 +233,87 @@ export async function getDistanceForNewLocation(
   const [toResults, fromResults] = await Promise.all([toPromise, fromPromise]);
   return { toResults, fromResults };
 }
+
+/**
+ * Refine a day's schedule using Google Maps with departure-time-aware travel estimates.
+ * Takes the ordered list of addresses for a day route (home → clients → home)
+ * and the departure date/time, returns updated travel times in minutes for each leg.
+ */
+export async function getTimeDependentTravelTimes(
+  addresses: string[],
+  departureDate: Date,
+  onProgress?: (msg: string) => void,
+): Promise<{ travelMinutes: (number | null)[]; durationInTraffic: (number | null)[] }> {
+  if (addresses.length < 2) return { travelMinutes: [], durationInTraffic: [] };
+
+  await waitForGoogle();
+  const service = new google.maps.DistanceMatrixService();
+
+  const travelMinutes: (number | null)[] = [];
+  const durationInTraffic: (number | null)[] = [];
+
+  // Calculate each sequential leg with departure time
+  let currentDepartureTime = departureDate;
+
+  for (let i = 0; i < addresses.length - 1; i++) {
+    const origin = addresses[i];
+    const dest = addresses[i + 1];
+
+    onProgress?.(`Calculating leg ${i + 1} of ${addresses.length - 1}...`);
+
+    try {
+      const response = await new Promise<google.maps.DistanceMatrixResponse>(
+        (resolve, reject) => {
+          service.getDistanceMatrix(
+            {
+              origins: [origin],
+              destinations: [dest],
+              travelMode: google.maps.TravelMode.DRIVING,
+              drivingOptions: {
+                departureTime: currentDepartureTime,
+                trafficModel: google.maps.TrafficModel.BEST_GUESS,
+              },
+            },
+            (response, status) => {
+              if (status !== 'OK' || !response) {
+                reject(new Error(`Distance Matrix error: ${status}`));
+                return;
+              }
+              resolve(response);
+            },
+          );
+        },
+      );
+
+      const el = response.rows[0].elements[0];
+      if (el.status === 'OK') {
+        const baseMins = Math.round(el.duration.value / 60);
+        const trafficMins = el.duration_in_traffic
+          ? Math.round(el.duration_in_traffic.value / 60)
+          : baseMins;
+        travelMinutes.push(baseMins);
+        durationInTraffic.push(trafficMins);
+
+        // Advance departure time by travel + a placeholder visit duration
+        // (caller will use actual visit durations to refine)
+        currentDepartureTime = new Date(
+          currentDepartureTime.getTime() + trafficMins * 60 * 1000,
+        );
+      } else {
+        travelMinutes.push(null);
+        durationInTraffic.push(null);
+      }
+    } catch (err) {
+      console.error(`Leg ${i + 1} failed:`, err);
+      travelMinutes.push(null);
+      durationInTraffic.push(null);
+    }
+
+    // Rate limit between legs
+    if (i < addresses.length - 2) {
+      await sleep(150);
+    }
+  }
+
+  return { travelMinutes, durationInTraffic };
+}
