@@ -11,7 +11,7 @@ interface NominatimResult {
 
 interface AddressSearchProps {
   value: string;
-  onChange: (address: string) => void;
+  onChange: (address: string, coords?: { lat: number; lon: number }) => void;
   placeholder?: string;
   id?: string;
 }
@@ -67,7 +67,7 @@ export function AddressSearch({ value, onChange, placeholder = '123 Main St, Cit
 
   const handleSelect = (result: NominatimResult) => {
     setQuery(result.display_name);
-    onChange(result.display_name);
+    onChange(result.display_name, { lat: parseFloat(result.lat), lon: parseFloat(result.lon) });
     setOpen(false);
     setResults([]);
   };

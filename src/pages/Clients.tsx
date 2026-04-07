@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
-import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, DAYS_OF_WEEK, DAY_LABELS } from '@/types/models';
+import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, DAYS_OF_WEEK, DAY_LABELS, type Coords } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
 import { toast } from 'sonner';
 
@@ -183,7 +183,7 @@ function ClientForm({ client, onSave, onCancel }: { client: Client; onSave: (c: 
         </div>
         <div>
           <Label htmlFor="address">Address</Label>
-          <AddressSearch id="address" value={form.address} onChange={address => setForm({ ...form, address })} />
+          <AddressSearch id="address" value={form.address} onChange={(address, coords) => setForm({ ...form, address, coords: coords ?? form.coords })} />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-4">

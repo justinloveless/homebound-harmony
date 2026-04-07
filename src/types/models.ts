@@ -16,10 +16,16 @@ export const DAY_LABELS: Record<DayOfWeek, string> = {
 export type Frequency = 'weekly' | 'biweekly' | 'monthly';
 export type Priority = 'high' | 'medium' | 'low';
 
+export interface Coords {
+  lat: number;
+  lon: number;
+}
+
 export interface Client {
   id: string;
   name: string;
   address: string;
+  coords?: Coords;
   visitDurationMinutes: number;
   frequency: Frequency;
   priority: Priority;
@@ -30,10 +36,12 @@ export interface Client {
 export interface WorkerProfile {
   name: string;
   homeAddress: string;
+  homeCoords?: Coords;
   workingHours: { startTime: string; endTime: string };
   daysOff: DayOfWeek[];
   breaks: { startTime: string; endTime: string; label: string }[];
 }
+
 
 // Travel time in minutes between two location IDs
 // Key format: "locA_id|locB_id" (sorted alphabetically so it's bidirectional)
@@ -89,3 +97,18 @@ export const DEFAULT_WORKSPACE: Workspace = {
 };
 
 export const DEFAULT_TRAVEL_TIME = 15; // minutes
+
+/** Estimate drive time in minutes from lat/lon using haversine + average speed */
+export function estimateTravelMinutes(a: Coords, b: Coords): number {
+  const R = 6371; // km
+  const toRad = (deg: number) => deg * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const h = sinLat * sinLat + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLon * sinLon;
+  const distKm = 2 * R * Math.asin(Math.sqrt(h));
+  // Assume ~40 km/h average driving speed with 1.3x road winding factor
+  const driveKm = distKm * 1.3;
+  return Math.max(5, Math.round(driveKm / 40 * 60));
+}

@@ -1,6 +1,24 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { loadWorkspace, saveWorkspace } from '@/lib/storage';
-import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type WeekSchedule, DEFAULT_WORKSPACE } from '@/types/models';
+import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type WeekSchedule, DEFAULT_WORKSPACE, travelKey, estimateTravelMinutes, type Coords } from '@/types/models';
+
+/** Recalculate travel times for all location pairs that have coordinates */
+function recalcTravelTimes(ws: Workspace): TravelTimeMatrix {
+  const matrix = { ...ws.travelTimes };
+  const locations: { id: string; coords?: Coords }[] = [
+    { id: 'home', coords: ws.worker.homeCoords },
+    ...ws.clients.map(c => ({ id: c.id, coords: c.coords })),
+  ];
+  for (let i = 0; i < locations.length; i++) {
+    for (let j = i + 1; j < locations.length; j++) {
+      const a = locations[i], b = locations[j];
+      if (a.coords && b.coords) {
+        matrix[travelKey(a.id, b.id)] = estimateTravelMinutes(a.coords, b.coords);
+      }
+    }
+  }
+  return matrix;
+}
 
 interface WorkspaceContextValue {
   workspace: Workspace;
@@ -31,7 +49,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateWorker = useCallback((worker: WorkerProfile) => {
-    setWorkspace(prev => { const next = { ...prev, worker }; persist(next); return next; });
+    setWorkspace(prev => {
+      const next = { ...prev, worker };
+      next.travelTimes = recalcTravelTimes(next);
+      persist(next);
+      return next;
+    });
   }, [persist]);
 
   const setClients = useCallback((clients: Client[]) => {
@@ -39,12 +62,18 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, [persist]);
 
   const addClient = useCallback((client: Client) => {
-    setWorkspace(prev => { const next = { ...prev, clients: [...prev.clients, client] }; persist(next); return next; });
+    setWorkspace(prev => {
+      const next = { ...prev, clients: [...prev.clients, client] };
+      next.travelTimes = recalcTravelTimes(next);
+      persist(next);
+      return next;
+    });
   }, [persist]);
 
   const updateClient = useCallback((client: Client) => {
     setWorkspace(prev => {
       const next = { ...prev, clients: prev.clients.map(c => c.id === client.id ? client : c) };
+      next.travelTimes = recalcTravelTimes(next);
       persist(next);
       return next;
     });
