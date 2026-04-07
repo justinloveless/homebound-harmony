@@ -121,6 +121,7 @@ export const DEFAULT_WORKSPACE: Workspace = {
     workingHours: { startTime: '08:00', endTime: '17:00' },
     daysOff: ['saturday', 'sunday'],
     breaks: [{ startTime: '12:00', endTime: '13:00', label: 'Lunch' }],
+    schedulingStrategy: 'spread',
   },
   clients: [],
   travelTimes: {},
