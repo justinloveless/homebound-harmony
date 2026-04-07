@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { loadWorkspace, saveWorkspace } from '@/lib/storage';
+import { loadWorkspace, saveWorkspace, autoSaveToFile, getCurrentFileHandle } from '@/lib/storage';
 import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type TravelTimeErrors, type WeekSchedule, type SavedSchedule, DEFAULT_WORKSPACE, travelKey, estimateTravelMinutes, type Coords } from '@/types/models';
 import { getDistanceForNewLocation } from '@/lib/google-maps';
 import { toast } from 'sonner';
@@ -100,6 +100,8 @@ interface WorkspaceContextValue {
   loadSavedSchedule: (id: string) => void;
   deleteSavedSchedule: (id: string) => void;
   renameSavedSchedule: (id: string, name: string) => void;
+  fileAutoSaveEnabled: boolean;
+  setFileAutoSaveEnabled: (enabled: boolean) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -107,6 +109,7 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [workspace, setWorkspace] = useState<Workspace>(DEFAULT_WORKSPACE);
   const [loading, setLoading] = useState(true);
+  const [fileAutoSaveEnabled, setFileAutoSaveEnabled] = useState(false);
 
   useEffect(() => {
     loadWorkspace().then(ws => { setWorkspace(ws); setLoading(false); });
@@ -115,7 +118,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const persist = useCallback((ws: Workspace) => {
     setWorkspace(ws);
     saveWorkspace(ws);
-  }, []);
+    // Auto-save to linked file if enabled
+    if (fileAutoSaveEnabled && getCurrentFileHandle()) {
+      autoSaveToFile(ws);
+    }
+  }, [fileAutoSaveEnabled]);
 
   const updateWorker = useCallback((worker: WorkerProfile) => {
     setWorkspace(prev => {
@@ -227,6 +234,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       workspace, loading, updateWorker, setClients, addClient, updateClient,
       removeClient, setTravelTimes, setTravelTimeErrors, setSchedule, replaceWorkspace,
       saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule,
+      fileAutoSaveEnabled, setFileAutoSaveEnabled,
     }}>
       {children}
     </WorkspaceContext.Provider>
