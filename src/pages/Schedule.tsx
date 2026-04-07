@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { generateWeekSchedule, recalcDaySchedule } from '@/lib/scheduler';
 import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek, type WeekSchedule, type DaySchedule, type ScheduledVisit, type SavedSchedule } from '@/types/models';
-import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus, Loader2, Save, FolderOpen, X, Eye, Pencil } from 'lucide-react';
+import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus, Loader2, Save, FolderOpen, X, Eye, Pencil, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
