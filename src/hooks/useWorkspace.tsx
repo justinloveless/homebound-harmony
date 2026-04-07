@@ -100,6 +100,8 @@ interface WorkspaceContextValue {
   loadSavedSchedule: (id: string) => void;
   deleteSavedSchedule: (id: string) => void;
   renameSavedSchedule: (id: string, name: string) => void;
+  fileAutoSaveEnabled: boolean;
+  setFileAutoSaveEnabled: (enabled: boolean) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
