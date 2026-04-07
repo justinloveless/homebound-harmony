@@ -47,6 +47,9 @@ export interface WorkerProfile {
 // Key format: "locA_id|locB_id" (sorted alphabetically so it's bidirectional)
 export type TravelTimeMatrix = Record<string, number>;
 
+// Track which travel time pairs had errors
+export type TravelTimeErrors = Record<string, string>;
+
 export function travelKey(a: string, b: string): string {
   return [a, b].sort().join('|');
 }
@@ -79,6 +82,7 @@ export interface Workspace {
   worker: WorkerProfile;
   clients: Client[];
   travelTimes: TravelTimeMatrix;
+  travelTimeErrors?: TravelTimeErrors;
   lastSchedule: WeekSchedule | null;
 }
 
@@ -93,6 +97,7 @@ export const DEFAULT_WORKSPACE: Workspace = {
   },
   clients: [],
   travelTimes: {},
+  travelTimeErrors: {},
   lastSchedule: null,
 };
 

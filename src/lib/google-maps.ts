@@ -1,7 +1,7 @@
 /// <reference types="google.maps" />
 /** Utilities for Google Maps APIs (Places Autocomplete + Distance Matrix) */
 
-const API_KEY = "AIzaSyCG9F1LxLsvRg7n5iKVIJgaGzgYlU4dBjA";
+const API_KEY = "AIzaSyCGQHsMGKk-IQ8hQaKV0lo9IEYoF7IBD40";
 
 /** Wait until the Google Maps script is loaded */
 export function waitForGoogle(): Promise<typeof google> {
@@ -24,59 +24,212 @@ export interface DistanceResult {
   distanceMeters: number;
 }
 
-/**
- * Calculate travel time between two addresses using the Distance Matrix API (REST).
- * Returns duration in minutes.
- */
-export async function getDistanceMatrix(
-  origins: string[],
-  destinations: string[],
-): Promise<(DistanceResult | null)[][]> {
-  const originsParam = origins.map((o) => encodeURIComponent(o)).join("|");
-  const destsParam = destinations.map((d) => encodeURIComponent(d)).join("|");
-
-  const res = await fetch(
-    `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originsParam}&destinations=${destsParam}&units=imperial&key=${API_KEY}`,
-  );
-
-  // The Distance Matrix REST API has CORS restrictions from browsers,
-  // so we'll use the JS SDK instead
-  throw new Error("Use JS SDK version instead");
+export interface BatchResult {
+  originIndex: number;
+  destIndex: number;
+  durationMinutes: number | null;
+  error?: string;
 }
 
 /**
- * Calculate travel times using the Google Maps JS SDK Distance Matrix Service.
- * Returns a 2D array [origin][destination] of duration in minutes.
+ * Google Distance Matrix API limit: max 25 origins or 25 destinations,
+ * and max 100 elements (origins × destinations) per request.
+ * We chunk accordingly.
  */
-export async function getDistanceMatrixSDK(
+const MAX_ELEMENTS_PER_REQUEST = 25;
+
+/** Sleep helper for rate limiting */
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Calculate travel times in batches to avoid MAX_ELEMENTS_EXCEEDED.
+ * Yields progress via onProgress callback.
+ * Returns results for all requested pairs.
+ */
+export async function getDistanceMatrixBatched(
   origins: string[],
   destinations: string[],
-): Promise<(number | null)[][]> {
+  onProgress?: (done: number, total: number) => void,
+): Promise<BatchResult[]> {
   await waitForGoogle();
-
   const service = new google.maps.DistanceMatrixService();
 
-  return new Promise((resolve, reject) => {
+  // Build list of all (i, j) pairs we need
+  const pairs: { oi: number; di: number }[] = [];
+  for (let oi = 0; oi < origins.length; oi++) {
+    for (let di = 0; di < destinations.length; di++) {
+      pairs.push({ oi, di });
+    }
+  }
+
+  const totalPairs = pairs.length;
+  const allResults: BatchResult[] = [];
+  let completed = 0;
+
+  // Chunk pairs into batches where origins × destinations ≤ MAX_ELEMENTS
+  // Strategy: group by unique origins, limit destinations per batch
+  const batches: { originIndices: number[]; destIndices: number[] }[] = [];
+
+  // Simple approach: iterate origins one at a time, chunk destinations
+  for (let oi = 0; oi < origins.length; oi++) {
+    for (let dStart = 0; dStart < destinations.length; dStart += MAX_ELEMENTS_PER_REQUEST) {
+      const dEnd = Math.min(dStart + MAX_ELEMENTS_PER_REQUEST, destinations.length);
+      const destIndices = Array.from({ length: dEnd - dStart }, (_, i) => dStart + i);
+      
+      // Try to merge with existing batch for same dest range
+      const existing = batches.find(
+        b => b.destIndices.length === destIndices.length &&
+             b.destIndices[0] === destIndices[0] &&
+             (b.originIndices.length + 1) * destIndices.length <= MAX_ELEMENTS_PER_REQUEST
+      );
+      if (existing) {
+        existing.originIndices.push(oi);
+      } else {
+        batches.push({ originIndices: [oi], destIndices });
+      }
+    }
+  }
+
+  for (const batch of batches) {
+    const batchOrigins = batch.originIndices.map((i) => origins[i]);
+    const batchDests = batch.destIndices.map((i) => destinations[i]);
+
+    try {
+      const response = await new Promise<google.maps.DistanceMatrixResponse>(
+        (resolve, reject) => {
+          service.getDistanceMatrix(
+            {
+              origins: batchOrigins,
+              destinations: batchDests,
+              travelMode: google.maps.TravelMode.DRIVING,
+              unitSystem: google.maps.UnitSystem.IMPERIAL,
+            },
+            (response, status) => {
+              if (status !== "OK" || !response) {
+                reject(new Error(`Distance Matrix API error: ${status}`));
+                return;
+              }
+              resolve(response);
+            },
+          );
+        },
+      );
+
+      // Process response
+      for (let ri = 0; ri < response.rows.length; ri++) {
+        for (let ci = 0; ci < response.rows[ri].elements.length; ci++) {
+          const el = response.rows[ri].elements[ci];
+          const originIndex = batch.originIndices[ri];
+          const destIndex = batch.destIndices[ci];
+
+          if (el.status === "OK") {
+            allResults.push({
+              originIndex,
+              destIndex,
+              durationMinutes: Math.round(el.duration.value / 60),
+            });
+          } else {
+            allResults.push({
+              originIndex,
+              destIndex,
+              durationMinutes: null,
+              error: `Status: ${el.status}`,
+            });
+          }
+          completed++;
+        }
+      }
+    } catch (err) {
+      // Mark all pairs in this batch as failed
+      for (const oi of batch.originIndices) {
+        for (const di of batch.destIndices) {
+          allResults.push({
+            originIndex: oi,
+            destIndex: di,
+            durationMinutes: null,
+            error: err instanceof Error ? err.message : "Unknown error",
+          });
+          completed++;
+        }
+      }
+    }
+
+    onProgress?.(completed, totalPairs);
+
+    // Rate limit: small delay between batches
+    if (batches.indexOf(batch) < batches.length - 1) {
+      await sleep(200);
+    }
+  }
+
+  return allResults;
+}
+
+/**
+ * Calculate travel times for a single new location against all existing locations.
+ * Used when adding a new client.
+ */
+export async function getDistanceForNewLocation(
+  newAddress: string,
+  existingAddresses: string[],
+): Promise<{ toResults: (number | null)[]; fromResults: (number | null)[] }> {
+  if (!newAddress.trim() || existingAddresses.length === 0) {
+    return { toResults: [], fromResults: [] };
+  }
+
+  await waitForGoogle();
+  const service = new google.maps.DistanceMatrixService();
+
+  // New → existing
+  const toPromise = new Promise<(number | null)[]>((resolve, reject) => {
     service.getDistanceMatrix(
       {
-        origins,
-        destinations,
+        origins: [newAddress],
+        destinations: existingAddresses,
         travelMode: google.maps.TravelMode.DRIVING,
         unitSystem: google.maps.UnitSystem.IMPERIAL,
       },
       (response, status) => {
         if (status !== "OK" || !response) {
-          reject(new Error(`Distance Matrix failed: ${status}`));
+          resolve(existingAddresses.map(() => null));
           return;
         }
-
-        const results: (number | null)[][] = response.rows.map((row) =>
-          row.elements.map((el) =>
+        resolve(
+          response.rows[0].elements.map((el) =>
             el.status === "OK" ? Math.round(el.duration.value / 60) : null,
           ),
         );
-        resolve(results);
       },
     );
   });
+
+  // Existing → new
+  const fromPromise = new Promise<(number | null)[]>((resolve, reject) => {
+    service.getDistanceMatrix(
+      {
+        origins: existingAddresses,
+        destinations: [newAddress],
+        travelMode: google.maps.TravelMode.DRIVING,
+        unitSystem: google.maps.UnitSystem.IMPERIAL,
+      },
+      (response, status) => {
+        if (status !== "OK" || !response) {
+          resolve(existingAddresses.map(() => null));
+          return;
+        }
+        resolve(
+          response.rows.map((row) =>
+            row.elements[0].status === "OK"
+              ? Math.round(row.elements[0].duration.value / 60)
+              : null,
+          ),
+        );
+      },
+    );
+  });
+
+  const [toResults, fromResults] = await Promise.all([toPromise, fromPromise]);
+  return { toResults, fromResults };
 }
