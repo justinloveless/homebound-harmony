@@ -22,6 +22,18 @@ export default function Schedule() {
   const { worker, clients, travelTimes, lastSchedule } = workspace;
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
 
+  // Compute scheduled vs unscheduled clients
+  const { scheduledClients, unscheduledClients } = useMemo(() => {
+    if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
+    const scheduledIds = new Set(
+      lastSchedule.days.flatMap(d => d.visits.map(v => v.clientId))
+    );
+    return {
+      scheduledClients: clients.filter(c => scheduledIds.has(c.id)),
+      unscheduledClients: clients.filter(c => !scheduledIds.has(c.id)),
+    };
+  }, [lastSchedule, clients]);
+
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
 
   const handleGenerate = () => {
