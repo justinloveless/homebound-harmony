@@ -296,7 +296,8 @@ export default function Schedule() {
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary/20 border border-primary/30" /> Travel</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary border border-primary" /> Visit</span>
                   </div>
-                  <div className="flex overflow-x-auto">
+                  <div ref={calendarScrollRef} className="flex overflow-x-auto overflow-y-auto max-h-[600px]"
+                    style={{ scrollBehavior: 'smooth' }}>
                     {/* Time labels column */}
                     <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: TOTAL_HEIGHT }}>
                       {hours.map(h => (
