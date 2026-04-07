@@ -229,7 +229,7 @@ export default function Schedule() {
                             <div className="flex-1">
                               <p className="font-medium">{client?.name}</p>
                               <p className="text-muted-foreground text-xs">{client?.address}</p>
-                              <p className="text-muted-foreground text-xs">{visit.startTime} – {visit.endTime} ({client?.visitDurationMinutes}min visit)</p>
+                              <p className="text-muted-foreground text-xs">{formatTime(visit.startTime)} – {formatTime(visit.endTime)} ({client?.visitDurationMinutes}min visit)</p>
                             </div>
                           </div>
                         </div>
