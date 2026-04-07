@@ -382,11 +382,13 @@ export default function Schedule() {
 
   // Clients available for the popup day
   const availableForPopupDay = useMemo(() => {
-    if (!newEventPopup || !lastSchedule) return clients;
-    const daySchedule = lastSchedule.days.find(d => d.day === newEventPopup.day);
+    if (!eventPopup || !lastSchedule) return clients;
+    const daySchedule = lastSchedule.days.find(d => d.day === eventPopup.day);
     const onDay = new Set(daySchedule?.visits.map(v => v.clientId) ?? []);
-    return clients.filter(c => !onDay.has(c.id));
-  }, [newEventPopup?.day, lastSchedule, clients]);
+    // In edit mode, include the current client as available
+    const editingClientId = eventPopup.mode === 'edit' ? eventPopup.clientId : null;
+    return clients.filter(c => !onDay.has(c.id) || c.id === editingClientId);
+  }, [eventPopup?.day, eventPopup?.mode, eventPopup?.clientId, lastSchedule, clients]);
 
   /** Handle clicking on the weekly calendar to add a new event */
   const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, minHeight: number) => {
