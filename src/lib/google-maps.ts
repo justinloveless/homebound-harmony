@@ -1,17 +1,17 @@
 /// <reference types="google.maps" />
 /** Utilities for Google Maps APIs (Places Autocomplete + Distance Matrix) */
 
-const API_KEY = 'AIzaSyCGQHsMGKk-IQ8hQaKV0lo9IEYoF7IBD40';
+const API_KEY = "AIzaSyCG9F1LxLsvRg7n5iKVIJgaGzgYlU4dBjA";
 
 /** Wait until the Google Maps script is loaded */
 export function waitForGoogle(): Promise<typeof google> {
   return new Promise((resolve) => {
-    if (typeof google !== 'undefined' && google.maps) {
+    if (typeof google !== "undefined" && google.maps) {
       resolve(google);
       return;
     }
     const check = setInterval(() => {
-      if (typeof google !== 'undefined' && google.maps) {
+      if (typeof google !== "undefined" && google.maps) {
         clearInterval(check);
         resolve(google);
       }
@@ -30,18 +30,18 @@ export interface DistanceResult {
  */
 export async function getDistanceMatrix(
   origins: string[],
-  destinations: string[]
+  destinations: string[],
 ): Promise<(DistanceResult | null)[][]> {
-  const originsParam = origins.map(o => encodeURIComponent(o)).join('|');
-  const destsParam = destinations.map(d => encodeURIComponent(d)).join('|');
+  const originsParam = origins.map((o) => encodeURIComponent(o)).join("|");
+  const destsParam = destinations.map((d) => encodeURIComponent(d)).join("|");
 
   const res = await fetch(
-    `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originsParam}&destinations=${destsParam}&units=imperial&key=${API_KEY}`
+    `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originsParam}&destinations=${destsParam}&units=imperial&key=${API_KEY}`,
   );
 
   // The Distance Matrix REST API has CORS restrictions from browsers,
   // so we'll use the JS SDK instead
-  throw new Error('Use JS SDK version instead');
+  throw new Error("Use JS SDK version instead");
 }
 
 /**
@@ -50,7 +50,7 @@ export async function getDistanceMatrix(
  */
 export async function getDistanceMatrixSDK(
   origins: string[],
-  destinations: string[]
+  destinations: string[],
 ): Promise<(number | null)[][]> {
   await waitForGoogle();
 
@@ -65,18 +65,18 @@ export async function getDistanceMatrixSDK(
         unitSystem: google.maps.UnitSystem.IMPERIAL,
       },
       (response, status) => {
-        if (status !== 'OK' || !response) {
+        if (status !== "OK" || !response) {
           reject(new Error(`Distance Matrix failed: ${status}`));
           return;
         }
 
-        const results: (number | null)[][] = response.rows.map(row =>
-          row.elements.map(el =>
-            el.status === 'OK' ? Math.round(el.duration.value / 60) : null
-          )
+        const results: (number | null)[][] = response.rows.map((row) =>
+          row.elements.map((el) =>
+            el.status === "OK" ? Math.round(el.duration.value / 60) : null,
+          ),
         );
         resolve(results);
-      }
+      },
     );
   });
 }
