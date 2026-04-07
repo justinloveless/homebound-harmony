@@ -406,7 +406,7 @@ export default function Schedule() {
     const mins = clampedMinutes % 60;
     const startTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 
-    setNewEventPopup({
+    setEventPopup({
       day,
       startTime,
       duration: 60, // default 1 hour
@@ -417,23 +417,23 @@ export default function Schedule() {
   };
 
   /** Confirm adding the new event from the popup */
-  const handleConfirmNewEvent = () => {
-    if (!newEventPopup || !newEventPopup.clientId || !lastSchedule) return;
-    const client = clients.find(c => c.id === newEventPopup.clientId);
+  const handleConfirmEvent = () => {
+    if (!eventPopup || !eventPopup.clientId || !lastSchedule) return;
+    const client = clients.find(c => c.id === eventPopup.clientId);
     if (!client) return;
 
-    const existingDay = lastSchedule.days.find(d => d.day === newEventPopup.day);
+    const existingDay = lastSchedule.days.find(d => d.day === eventPopup.day);
     const existingVisits = existingDay ? [...existingDay.visits] : [];
 
     // Parse start time
-    const [sh, sm] = newEventPopup.startTime.split(':').map(Number);
+    const [sh, sm] = eventPopup.startTime.split(':').map(Number);
     const startMin = sh * 60 + sm;
-    const endMin = startMin + newEventPopup.duration;
+    const endMin = startMin + eventPopup.duration;
     const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
     // Insert the visit at the correct position based on start time
     const newVisit: ScheduledVisit = {
-      clientId: newEventPopup.clientId,
+      clientId: eventPopup.clientId,
       startTime: toTime(startMin),
       endTime: toTime(endMin),
       travelTimeFromPrev: 0,
@@ -451,16 +451,16 @@ export default function Schedule() {
     existingVisits.splice(insertIdx, 0, newVisit);
 
     const date = existingDay?.date ?? (() => {
-      const dayIndex = DAYS_OF_WEEK.indexOf(newEventPopup.day);
+      const dayIndex = DAYS_OF_WEEK.indexOf(eventPopup.day);
       const dateObj = new Date(lastSchedule.weekStartDate);
       dateObj.setDate(dateObj.getDate() + dayIndex);
       return dateObj.toISOString().split('T')[0];
     })();
 
-    const recalced = recalcDaySchedule(existingVisits, newEventPopup.day, date, worker, clients, travelTimes);
-    updateDayInSchedule(recalced, newEventPopup.day);
-    toast.success(`${client.name} added to ${DAY_LABELS[newEventPopup.day]}`);
-    setNewEventPopup(null);
+    const recalced = recalcDaySchedule(existingVisits, eventPopup.day, date, worker, clients, travelTimes);
+    updateDayInSchedule(recalced, eventPopup.day);
+    toast.success(`${client.name} added to ${DAY_LABELS[eventPopup.day]}`);
+    setEventPopup(null);
   };
 
   return (
@@ -818,22 +818,22 @@ export default function Schedule() {
             })()}
 
             {/* New event popup */}
-            {newEventPopup && (
+            {eventPopup && (
               <>
                 {/* Backdrop */}
-                <div className="fixed inset-0 z-40" onClick={() => setNewEventPopup(null)} />
+                <div className="fixed inset-0 z-40" onClick={() => setEventPopup(null)} />
                 {/* Popup */}
                 <div
                   className="fixed z-50 w-72 rounded-lg border bg-popover text-popover-foreground shadow-lg p-4 space-y-3"
                   style={{
-                    left: Math.min(newEventPopup.x, window.innerWidth - 300),
-                    top: Math.min(newEventPopup.y, window.innerHeight - 350),
+                    left: Math.min(eventPopup.x, window.innerWidth - 300),
+                    top: Math.min(eventPopup.y, window.innerHeight - 350),
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold">New Visit — {DAY_LABELS[newEventPopup.day]}</h4>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setNewEventPopup(null)}>
+                    <h4 className="text-sm font-semibold">New Visit — {DAY_LABELS[eventPopup.day]}</h4>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEventPopup(null)}>
                       <X className="w-3 h-3" />
                     </Button>
                   </div>
@@ -841,9 +841,9 @@ export default function Schedule() {
                   <div className="space-y-2">
                     <div>
                       <Label className="text-xs">Client</Label>
-                      <Select value={newEventPopup.clientId} onValueChange={(id) => {
+                      <Select value={eventPopup.clientId} onValueChange={(id) => {
                         const client = clients.find(c => c.id === id);
-                        setNewEventPopup(prev => prev ? {
+                        setEventPopup(prev => prev ? {
                           ...prev,
                           clientId: id,
                           duration: client?.visitDurationMinutes ?? prev.duration,
@@ -868,9 +868,9 @@ export default function Schedule() {
                         <Input
                           type="time"
                           className="h-8 text-xs mt-1"
-                          value={newEventPopup.startTime}
+                          value={eventPopup.startTime}
                           step={900}
-                          onChange={(e) => setNewEventPopup(prev => prev ? { ...prev, startTime: e.target.value } : null)}
+                          onChange={(e) => setEventPopup(prev => prev ? { ...prev, startTime: e.target.value } : null)}
                         />
                       </div>
                       <div>
@@ -878,31 +878,31 @@ export default function Schedule() {
                         <Input
                           type="number"
                           className="h-8 text-xs mt-1"
-                          value={newEventPopup.duration}
+                          value={eventPopup.duration}
                           min={15}
                           step={15}
-                          onChange={(e) => setNewEventPopup(prev => prev ? { ...prev, duration: parseInt(e.target.value) || 15 } : null)}
+                          onChange={(e) => setEventPopup(prev => prev ? { ...prev, duration: parseInt(e.target.value) || 15 } : null)}
                         />
                       </div>
                     </div>
 
-                    {newEventPopup.clientId && (() => {
-                      const [sh, sm] = newEventPopup.startTime.split(':').map(Number);
-                      const endMin = sh * 60 + sm + newEventPopup.duration;
+                    {eventPopup.clientId && (() => {
+                      const [sh, sm] = eventPopup.startTime.split(':').map(Number);
+                      const endMin = sh * 60 + sm + eventPopup.duration;
                       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
                       return (
                         <p className="text-[10px] text-muted-foreground">
-                          {formatTime(newEventPopup.startTime)} – {formatTime(endTime)}
+                          {formatTime(eventPopup.startTime)} – {formatTime(endTime)}
                         </p>
                       );
                     })()}
                   </div>
 
                   <div className="flex gap-2 pt-1">
-                    <Button size="sm" className="flex-1 h-7 text-xs" disabled={!newEventPopup.clientId} onClick={handleConfirmNewEvent}>
+                    <Button size="sm" className="flex-1 h-7 text-xs" disabled={!eventPopup.clientId} onClick={handleConfirmEvent}>
                       <Plus className="w-3 h-3 mr-1" /> Add Visit
                     </Button>
-                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setNewEventPopup(null)}>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEventPopup(null)}>
                       Cancel
                     </Button>
                   </div>
