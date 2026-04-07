@@ -935,6 +935,28 @@ export default function Schedule() {
                   clients={clients}
                 />
               </div>
+            ) : selectedDay ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <MapPin className="w-4 h-4" />
+                    {DAY_LABELS[selectedDay]} — No visits yet
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-3">Add clients to build this day's schedule.</p>
+                  <Select onValueChange={(id) => addClientToDay(id, selectedDay)}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select a client to add..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clients.map(c => (
+                        <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </CardContent>
+              </Card>
             ) : (
               <Card className="border-dashed">
                 <CardContent className="py-12 text-center">
