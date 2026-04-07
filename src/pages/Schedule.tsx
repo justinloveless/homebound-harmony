@@ -126,6 +126,7 @@ export default function Schedule() {
           })();
 
           let arrival = Math.max(currentTime + travelMin, windowStart);
+          arrival = Math.ceil(arrival / 15) * 15; // Round to 15-min block
 
           // Skip over breaks
           for (const b of worker.breaks) {
@@ -133,6 +134,7 @@ export default function Schedule() {
             const be = b.endTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
             if (arrival < be && arrival + client.visitDurationMinutes > bs) {
               arrival = be;
+              arrival = Math.ceil(arrival / 15) * 15;
             }
           }
 
