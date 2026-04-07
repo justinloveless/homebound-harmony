@@ -80,7 +80,8 @@ export function generateWeekSchedule(
     // Gather candidates for this day
     const candidates: CandidateVisit[] = [];
     for (const client of eligibleClients) {
-      if (scheduledClientIds.has(client.id) && client.frequency === 'weekly') continue;
+      // Each client should only be scheduled once per week
+      if (scheduledClientIds.has(client.id)) continue;
       const window = getClientWindowForDay(client, day);
       if (window) {
         candidates.push({ client, window });
