@@ -62,7 +62,22 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, [persist]);
 
   const addClient = useCallback((client: Client) => {
-    setWorkspace(prev => { const next = { ...prev, clients: [...prev.clients, client] }; persist(next); return next; });
+    setWorkspace(prev => {
+      const next = { ...prev, clients: [...prev.clients, client] };
+      next.travelTimes = recalcTravelTimes(next);
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const updateClient = useCallback((client: Client) => {
+    setWorkspace(prev => {
+      const next = { ...prev, clients: prev.clients.map(c => c.id === client.id ? client : c) };
+      next.travelTimes = recalcTravelTimes(next);
+      persist(next);
+      return next;
+    });
+  }, [persist]);
   }, [persist]);
 
   const updateClient = useCallback((client: Client) => {
