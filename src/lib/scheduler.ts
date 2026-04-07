@@ -205,6 +205,11 @@ export function generateWeekSchedule(
       currentLocationId = chosen.client.id;
       usedIds.add(chosen.client.id);
       visitCounts.set(chosen.client.id, (visitCounts.get(chosen.client.id) ?? 0) + 1);
+      // Track which days this client is scheduled on
+      if (!clientScheduledDays.has(chosen.client.id)) {
+        clientScheduledDays.set(chosen.client.id, new Set());
+      }
+      clientScheduledDays.get(chosen.client.id)!.add(day);
       candidates.splice(bestIdx, 1);
     }
 

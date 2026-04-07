@@ -128,6 +128,21 @@ export default function SettingsPage() {
           </div>
 
           <div>
+            <Label className="mb-2 block">Scheduling Strategy</Label>
+            <Select value={form.schedulingStrategy ?? 'spread'} onValueChange={(v) => setForm({ ...form, schedulingStrategy: v as SchedulingStrategy })}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(STRATEGY_LABELS) as [SchedulingStrategy, string][]).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">Controls how clients are distributed across your working days.</p>
+          </div>
+
+          <div>
             <div className="flex items-center justify-between mb-2">
               <Label>Breaks</Label>
               <Button type="button" variant="ghost" size="sm" onClick={addBreak}>
