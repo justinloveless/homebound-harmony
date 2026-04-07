@@ -561,6 +561,26 @@ export default function Schedule() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {/* Daily totals */}
+                    <div className="flex flex-wrap gap-4 text-xs pb-2 border-b">
+                      <div>
+                        <span className="text-muted-foreground">Travel: </span>
+                        <span className="font-semibold">{selectedDaySchedule.totalTravelMinutes} min</span>
+                      </div>
+                      {(() => {
+                        const totalMiles = selectedDaySchedule.visits.reduce((s, v) => s + (v.travelDistanceMiFromPrev ?? 0), 0);
+                        return totalMiles > 0 ? (
+                          <div>
+                            <span className="text-muted-foreground">Distance: </span>
+                            <span className="font-semibold">{totalMiles.toFixed(1)} mi</span>
+                          </div>
+                        ) : null;
+                      })()}
+                      <div>
+                        <span className="text-muted-foreground">Away: </span>
+                        <span className="font-semibold">{formatTime(selectedDaySchedule.leaveHomeTime)} – {formatTime(selectedDaySchedule.arriveHomeTime)}</span>
+                      </div>
+                    </div>
                     <div className="flex items-center gap-3 text-sm text-muted-foreground">
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">🏠</div>
                       <div>
