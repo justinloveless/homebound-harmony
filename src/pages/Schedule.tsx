@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { generateWeekSchedule } from '@/lib/scheduler';
-import { DAY_LABELS, DAYS_OF_WEEK, type DayOfWeek } from '@/types/models';
+import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek } from '@/types/models';
 import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
@@ -177,7 +177,7 @@ export default function Schedule() {
                       {unscheduledClients.map(c => (
                         <div key={c.id} className="text-xs flex items-center justify-between">
                           <span className="truncate">{c.name}</span>
-                          <Badge variant="outline" className="text-[10px] shrink-0">{c.frequency}</Badge>
+                          <Badge variant="outline" className="text-[10px] shrink-0">{c.visitsPerPeriod}x {PERIOD_LABELS[c.period]}</Badge>
                         </div>
                       ))}
                     </div>

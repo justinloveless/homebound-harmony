@@ -1,7 +1,7 @@
 import {
   type Client, type WorkerProfile, type TravelTimeMatrix, type DayOfWeek,
   type DaySchedule, type WeekSchedule, type ScheduledVisit, type TimeWindow,
-  DAYS_OF_WEEK, travelKey, DEFAULT_TRAVEL_TIME,
+  DAYS_OF_WEEK, travelKey, DEFAULT_TRAVEL_TIME, frequencyToVisits,
 } from '@/types/models';
 
 function timeToMinutes(t: string): number {
@@ -23,11 +23,28 @@ function getClientWindowForDay(client: Client, day: DayOfWeek): TimeWindow | nul
   return client.timeWindows.find(tw => tw.day === day) ?? null;
 }
 
-function shouldScheduleThisWeek(client: Client, weekIndex: number): boolean {
-  if (client.frequency === 'weekly') return true;
-  if (client.frequency === 'biweekly') return weekIndex % 2 === 0;
-  if (client.frequency === 'monthly') return weekIndex % 4 === 0;
-  return true;
+/** How many visits this client needs this week */
+function visitsNeededThisWeek(client: Client, weekIndex: number): number {
+  // Support new format
+  const vpp = client.visitsPerPeriod ?? 1;
+  const period = client.period;
+
+  // Legacy frequency field migration
+  if (!period && (client as any).frequency) {
+    const converted = frequencyToVisits((client as any).frequency);
+    return visitsNeededForPeriod(converted.visitsPerPeriod, converted.period, weekIndex);
+  }
+
+  return visitsNeededForPeriod(vpp, period ?? 'week', weekIndex);
+}
+
+function visitsNeededForPeriod(visitsPerPeriod: number, period: string, weekIndex: number): number {
+  switch (period) {
+    case 'week': return visitsPerPeriod;
+    case '2weeks': return weekIndex % 2 === 0 ? visitsPerPeriod : 0;
+    case 'month': return weekIndex % 4 === 0 ? visitsPerPeriod : 0;
+    default: return visitsPerPeriod;
+  }
 }
 
 // Check if a time range overlaps with any worker break
@@ -64,32 +81,47 @@ export function generateWeekSchedule(
   weekStartDate: string,
   weekIndex: number = 0,
 ): WeekSchedule {
-  const eligibleClients = clients.filter(c => shouldScheduleThisWeek(c, weekIndex));
   const workStart = timeToMinutes(worker.workingHours.startTime);
   const workEnd = timeToMinutes(worker.workingHours.endTime);
 
-  const days: DaySchedule[] = [];
-  const scheduledClientIds = new Set<string>();
+  // Track how many times each client has been scheduled this week
+  const visitCounts = new Map<string, number>();
+  // Track how many visits each client needs
+  const visitsNeeded = new Map<string, number>();
 
-  // Priority order: high first
+  for (const c of clients) {
+    const needed = visitsNeededThisWeek(c, weekIndex);
+    visitsNeeded.set(c.id, needed);
+    visitCounts.set(c.id, 0);
+  }
+
+  const days: DaySchedule[] = [];
   const priorityOrder = { high: 0, medium: 1, low: 2 };
 
   for (const day of DAYS_OF_WEEK) {
     if (worker.daysOff.includes(day)) continue;
 
-    // Gather candidates for this day
+    // Gather candidates: clients that still need more visits this week and are available today
     const candidates: CandidateVisit[] = [];
-    for (const client of eligibleClients) {
-      // Each client should only be scheduled once per week
-      if (scheduledClientIds.has(client.id)) continue;
+    for (const client of clients) {
+      const needed = visitsNeeded.get(client.id) ?? 0;
+      const scheduled = visitCounts.get(client.id) ?? 0;
+      if (scheduled >= needed) continue;
+
       const window = getClientWindowForDay(client, day);
       if (window) {
         candidates.push({ client, window });
       }
     }
 
-    // Sort by priority
-    candidates.sort((a, b) => priorityOrder[a.client.priority] - priorityOrder[b.client.priority]);
+    // Sort by priority, then by how many visits still needed (most remaining first)
+    candidates.sort((a, b) => {
+      const pDiff = priorityOrder[a.client.priority] - priorityOrder[b.client.priority];
+      if (pDiff !== 0) return pDiff;
+      const aRemaining = (visitsNeeded.get(a.client.id) ?? 0) - (visitCounts.get(a.client.id) ?? 0);
+      const bRemaining = (visitsNeeded.get(b.client.id) ?? 0) - (visitCounts.get(b.client.id) ?? 0);
+      return bRemaining - aRemaining;
+    });
 
     // Nearest-neighbor greedy scheduling
     const visits: ScheduledVisit[] = [];
@@ -135,7 +167,7 @@ export function generateWeekSchedule(
       currentTime = bestArrival + chosen.client.visitDurationMinutes;
       currentLocationId = chosen.client.id;
       usedIds.add(chosen.client.id);
-      scheduledClientIds.add(chosen.client.id);
+      visitCounts.set(chosen.client.id, (visitCounts.get(chosen.client.id) ?? 0) + 1);
       candidates.splice(bestIdx, 1);
     }
 

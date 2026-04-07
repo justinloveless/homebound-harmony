@@ -14,7 +14,23 @@ export const DAY_LABELS: Record<DayOfWeek, string> = {
 };
 
 export type Frequency = 'weekly' | 'biweekly' | 'monthly';
+export type SchedulePeriod = 'week' | '2weeks' | 'month';
 export type Priority = 'high' | 'medium' | 'low';
+
+export const PERIOD_LABELS: Record<SchedulePeriod, string> = {
+  week: 'per week',
+  '2weeks': 'per 2 weeks',
+  month: 'per month',
+};
+
+/** Convert legacy Frequency to new visits-per-period format */
+export function frequencyToVisits(freq: Frequency): { visitsPerPeriod: number; period: SchedulePeriod } {
+  switch (freq) {
+    case 'weekly': return { visitsPerPeriod: 1, period: 'week' };
+    case 'biweekly': return { visitsPerPeriod: 1, period: '2weeks' };
+    case 'monthly': return { visitsPerPeriod: 1, period: 'month' };
+  }
+}
 
 export interface Coords {
   lat: number;
@@ -27,7 +43,10 @@ export interface Client {
   address: string;
   coords?: Coords;
   visitDurationMinutes: number;
-  frequency: Frequency;
+  /** @deprecated Use visitsPerPeriod + period instead */
+  frequency?: Frequency;
+  visitsPerPeriod: number;
+  period: SchedulePeriod;
   priority: Priority;
   timeWindows: TimeWindow[];
   notes: string;

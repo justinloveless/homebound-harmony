@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
-import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, DAYS_OF_WEEK, DAY_LABELS, type Coords } from '@/types/models';
+import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, type SchedulePeriod, DAYS_OF_WEEK, DAY_LABELS, PERIOD_LABELS, type Coords } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
 import { toast } from 'sonner';
 
@@ -19,7 +19,8 @@ const emptyClient = (): Client => ({
   name: '',
   address: '',
   visitDurationMinutes: 60,
-  frequency: 'weekly',
+  visitsPerPeriod: 1,
+  period: 'week',
   priority: 'medium',
   timeWindows: [],
   notes: '',
@@ -186,20 +187,25 @@ function ClientForm({ client, onSave, onCancel }: { client: Client; onSave: (c: 
           <AddressSearch id="address" value={form.address} onChange={(address, coords) => setForm({ ...form, address, coords: coords ?? form.coords })} />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <div>
           <Label>Duration (min)</Label>
           <Input type="number" value={form.visitDurationMinutes} min={15} step={15}
             onChange={e => setForm({ ...form, visitDurationMinutes: Number(e.target.value) })} />
         </div>
         <div>
-          <Label>Frequency</Label>
-          <Select value={form.frequency} onValueChange={(v: Frequency) => setForm({ ...form, frequency: v })}>
+          <Label>Visits</Label>
+          <Input type="number" value={form.visitsPerPeriod} min={1} max={7}
+            onChange={e => setForm({ ...form, visitsPerPeriod: Number(e.target.value) })} />
+        </div>
+        <div>
+          <Label>Period</Label>
+          <Select value={form.period} onValueChange={(v: SchedulePeriod) => setForm({ ...form, period: v })}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="weekly">Weekly</SelectItem>
-              <SelectItem value="biweekly">Biweekly</SelectItem>
-              <SelectItem value="monthly">Monthly</SelectItem>
+              <SelectItem value="week">Per week</SelectItem>
+              <SelectItem value="2weeks">Per 2 weeks</SelectItem>
+              <SelectItem value="month">Per month</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -325,7 +331,7 @@ export default function Clients() {
                     <Badge variant="outline" className={priorityColor[client.priority]}>
                       {client.priority}
                     </Badge>
-                    <Badge variant="secondary" className="text-xs">{client.frequency}</Badge>
+                    <Badge variant="secondary" className="text-xs">{client.visitsPerPeriod}x {PERIOD_LABELS[client.period]}</Badge>
                   </div>
                   <p className="text-sm text-muted-foreground mt-1 truncate">{client.address}</p>
                   <div className="flex flex-wrap gap-1 mt-2">
