@@ -105,7 +105,7 @@ export default function Schedule() {
                           <div key={i} className="text-xs flex items-center gap-2">
                             <span className="w-4 h-4 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
                             <span className="truncate">{client?.name}</span>
-                            <span className="text-muted-foreground ml-auto shrink-0">{v.startTime}</span>
+                            <span className="text-muted-foreground ml-auto shrink-0">{formatTime(v.startTime)}</span>
                           </div>
                         );
                       })}
