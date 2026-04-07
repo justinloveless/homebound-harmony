@@ -50,9 +50,8 @@ export default function Schedule() {
   const [compareId, setCompareId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-
   const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
-
+  const [copyMenuDay, setCopyMenuDay] = useState<DayOfWeek | null>(null);
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
     const scheduledIds = new Set(
