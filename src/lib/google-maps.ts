@@ -318,5 +318,5 @@ export async function getTimeDependentTravelTimes(
     }
   }
 
-  return { travelMinutes, durationInTraffic };
+  return { travelMinutes, durationInTraffic, distanceMiles };
 }
