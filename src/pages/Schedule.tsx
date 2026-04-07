@@ -239,7 +239,7 @@ export default function Schedule() {
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">🏠</div>
                       <div>
                         <p className="font-medium text-foreground">Arrive Home</p>
-                        <p>{selectedDaySchedule.arriveHomeTime}</p>
+                        <p>{formatTime(selectedDaySchedule.arriveHomeTime)}</p>
                       </div>
                     </div>
                   </CardContent>
