@@ -46,7 +46,7 @@ export default function RouteMap({ workerAddress, workerCoords, visits, clients 
       // Directions
       const renderer = new g.maps.DirectionsRenderer({
         map,
-        suppressMarkers: false,
+        suppressMarkers: true,
         polylineOptions: { strokeColor: '#0891b2', strokeWeight: 4, strokeOpacity: 0.8 },
       });
       directionsRenderer.current = renderer;
