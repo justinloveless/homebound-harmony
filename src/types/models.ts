@@ -102,6 +102,8 @@ export interface WeekSchedule {
   days: DaySchedule[];
   totalTravelMinutes: number;
   totalTimeAwayMinutes: number;
+  /** Client ID → group label (e.g. "A" or "B") for alternate strategy */
+  clientGroups?: Record<string, string>;
 }
 
 export interface Workspace {

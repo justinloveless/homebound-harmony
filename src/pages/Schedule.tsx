@@ -338,6 +338,28 @@ export default function Schedule() {
               </CardContent>
             </Card>
 
+            {lastSchedule.clientGroups && Object.keys(lastSchedule.clientGroups).length > 0 && (
+              <Card>
+                <CardContent className="pt-5">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Scheduling Groups</p>
+                  <div className="flex gap-4 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-5 h-5 rounded bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold">A</span>
+                      <span className="text-muted-foreground">
+                        {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).filter((_, i) => i % 2 === 0).map(d => DAY_LABELS[d]).join(', ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-5 h-5 rounded bg-secondary/30 text-secondary-foreground flex items-center justify-center text-[10px] font-bold">B</span>
+                      <span className="text-muted-foreground">
+                        {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).filter((_, i) => i % 2 === 1).map(d => DAY_LABELS[d]).join(', ')}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Card>
                 <CardHeader className="pb-2">
@@ -353,10 +375,18 @@ export default function Schedule() {
                     <div className="space-y-1">
                       {scheduledClients.map(c => {
                         const day = lastSchedule.days.find(d => d.visits.some(v => v.clientId === c.id));
+                        const group = lastSchedule.clientGroups?.[c.id];
                         return (
-                          <div key={c.id} className="text-xs flex items-center justify-between">
+                          <div key={c.id} className="text-xs flex items-center justify-between gap-2">
                             <span className="truncate">{c.name}</span>
-                            <Badge variant="outline" className="text-[10px] shrink-0">{day ? DAY_LABELS[day.day] : ''}</Badge>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {group && (
+                                <Badge variant={group === 'A' ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0">
+                                  {group}
+                                </Badge>
+                              )}
+                              <Badge variant="outline" className="text-[10px]">{day ? DAY_LABELS[day.day] : ''}</Badge>
+                            </div>
                           </div>
                         );
                       })}

@@ -410,11 +410,22 @@ export function generateWeekSchedule(
     return s + (timeToMinutes(d.arriveHomeTime) - timeToMinutes(d.leaveHomeTime));
   }, 0);
 
+  // Build client group map for display
+  const clientGroups: Record<string, string> = {};
+  if (strategy === 'alternate') {
+    for (const [clientId, indices] of clientDayGroup.entries()) {
+      // Check if all indices are even (Group A) or odd (Group B)
+      const allEven = [...indices].every(i => i % 2 === 0);
+      clientGroups[clientId] = allEven ? 'A' : 'B';
+    }
+  }
+
   return {
     weekStartDate,
     days,
     totalTravelMinutes: totalTravel,
     totalTimeAwayMinutes: totalAway,
+    clientGroups: strategy === 'alternate' ? clientGroups : undefined,
   };
 }
 
