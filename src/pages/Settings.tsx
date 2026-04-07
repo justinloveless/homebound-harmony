@@ -49,6 +49,12 @@ export default function SettingsPage() {
     });
   };
 
+  const handleCopyToClipboard = async () => {
+    const json = exportWorkspace(workspace);
+    await navigator.clipboard.writeText(json);
+    toast.success('Workspace copied to clipboard');
+  };
+
   const handleExport = () => {
     const json = exportWorkspace(workspace);
     downloadJson(json, `routecare-backup-${new Date().toISOString().split('T')[0]}.json`);
