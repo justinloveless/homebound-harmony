@@ -31,7 +31,12 @@ function migrateWorkspace(ws: Workspace): Workspace {
     }
     return { ...c, visitsPerPeriod: 1, period: 'week' as const };
   });
-  return { ...ws, clients };
+  // Migrate missing schedulingStrategy
+  const worker = ws.worker;
+  if (!worker.schedulingStrategy) {
+    worker.schedulingStrategy = 'spread';
+  }
+  return { ...ws, clients, worker };
 }
 
 export async function loadWorkspace(): Promise<Workspace> {
