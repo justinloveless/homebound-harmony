@@ -82,6 +82,7 @@ export default function RouteMap({ workerAddress, workerCoords, visits, clients 
         }
         // Add numbered stop markers
         if (route?.legs) {
+          route.legs.forEach((leg, i) => {
             if (i < visits.length) {
               const visit = visits[i];
               const client = visitClients[i];
