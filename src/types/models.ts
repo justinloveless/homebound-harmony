@@ -16,10 +16,16 @@ export const DAY_LABELS: Record<DayOfWeek, string> = {
 export type Frequency = 'weekly' | 'biweekly' | 'monthly';
 export type Priority = 'high' | 'medium' | 'low';
 
+export interface Coords {
+  lat: number;
+  lon: number;
+}
+
 export interface Client {
   id: string;
   name: string;
   address: string;
+  coords?: Coords;
   visitDurationMinutes: number;
   frequency: Frequency;
   priority: Priority;
