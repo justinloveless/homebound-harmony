@@ -39,6 +39,22 @@ export default function Schedule() {
     };
   }, [lastSchedule, clients]);
 
+  // Auto-scroll calendar to working hours
+  const scrollToWorkHours = useCallback(() => {
+    if (calendarScrollRef.current) {
+      const whStart = worker.workingHours.startTime.split(':').map(Number);
+      const scrollTo = Math.max(0, (whStart[0] - 1) * 48); // 1 hour before work start
+      calendarScrollRef.current.scrollTop = scrollTo;
+    }
+  }, [worker.workingHours.startTime]);
+
+  useEffect(() => {
+    if (lastSchedule) {
+      // Small delay to let the DOM render
+      setTimeout(scrollToWorkHours, 100);
+    }
+  }, [lastSchedule, scrollToWorkHours]);
+
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
 
   /** Refine a schedule's travel times using Google Maps with departure times */
