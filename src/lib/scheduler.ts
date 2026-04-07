@@ -99,9 +99,19 @@ export function generateWeekSchedule(
   const days: DaySchedule[] = [];
   const priorityOrder = { high: 0, medium: 1, low: 2 };
 
-  for (const day of DAYS_OF_WEEK) {
-    if (worker.daysOff.includes(day)) continue;
+  // Build the list of working days
+  const workingDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+  const strategy: SchedulingStrategy = worker.schedulingStrategy ?? 'spread';
 
+  // Assign each client a "preferred day set" based on strategy
+  // For 'alternate': even-index clients prefer day indices 0,2,4; odd-index prefer 1,3
+  // For 'spread': distribute clients round-robin across days
+  // For 'pack': no preference, just greedily fill days in order (original behavior)
+
+  // Track which days each client has been scheduled on (for multi-visit clients)
+  const clientScheduledDays = new Map<string, Set<DayOfWeek>>();
+
+  for (const day of workingDays) {
     // Gather candidates: clients that still need more visits this week and are available today
     const candidates: CandidateVisit[] = [];
     for (const client of clients) {
@@ -115,10 +125,36 @@ export function generateWeekSchedule(
       }
     }
 
-    // Sort by priority, then by how many visits still needed (most remaining first)
+    // Sort by priority first
     candidates.sort((a, b) => {
       const pDiff = priorityOrder[a.client.priority] - priorityOrder[b.client.priority];
       if (pDiff !== 0) return pDiff;
+
+      // Apply strategy-based day preference scoring
+      const dayIdx = workingDays.indexOf(day);
+
+      if (strategy === 'alternate') {
+        // Prefer clients whose index parity matches the day parity (Mon/Wed/Fri vs Tue/Thu)
+        const aClientIdx = clients.indexOf(a.client);
+        const bClientIdx = clients.indexOf(b.client);
+        const aMatch = (aClientIdx % 2 === dayIdx % 2) ? 0 : 1;
+        const bMatch = (bClientIdx % 2 === dayIdx % 2) ? 0 : 1;
+        if (aMatch !== bMatch) return aMatch - bMatch;
+      } else if (strategy === 'spread') {
+        // Prefer clients who have been scheduled on fewer days so far
+        const aScheduledDays = clientScheduledDays.get(a.client.id)?.size ?? 0;
+        const bScheduledDays = clientScheduledDays.get(b.client.id)?.size ?? 0;
+        // Prefer less-scheduled clients
+        if (aScheduledDays !== bScheduledDays) return aScheduledDays - bScheduledDays;
+        // Among equally scheduled, prefer clients whose "home day" matches
+        // Distribute by assigning each client a preferred day slot
+        const aPreferred = clients.indexOf(a.client) % workingDays.length;
+        const bPreferred = clients.indexOf(b.client) % workingDays.length;
+        const aDist = Math.abs(dayIdx - aPreferred);
+        const bDist = Math.abs(dayIdx - bPreferred);
+        if (aDist !== bDist) return aDist - bDist;
+      }
+
       const aRemaining = (visitsNeeded.get(a.client.id) ?? 0) - (visitCounts.get(a.client.id) ?? 0);
       const bRemaining = (visitsNeeded.get(b.client.id) ?? 0) - (visitCounts.get(b.client.id) ?? 0);
       return bRemaining - aRemaining;
