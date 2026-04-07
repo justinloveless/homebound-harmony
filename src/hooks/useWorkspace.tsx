@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { loadWorkspace, saveWorkspace } from '@/lib/storage';
+import { loadWorkspace, saveWorkspace, autoSaveToFile, getCurrentFileHandle } from '@/lib/storage';
 import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type TravelTimeErrors, type WeekSchedule, type SavedSchedule, DEFAULT_WORKSPACE, travelKey, estimateTravelMinutes, type Coords } from '@/types/models';
 import { getDistanceForNewLocation } from '@/lib/google-maps';
 import { toast } from 'sonner';
