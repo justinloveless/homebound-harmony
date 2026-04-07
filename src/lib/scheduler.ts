@@ -123,6 +123,7 @@ function tryInsertClient(
       const fromId = j === pos ? client.id : newVisits[j - 1].clientId;
       const travel = getTravelTime(travelTimes, fromId, v.clientId);
       let vArrival = Math.max(currentTime + travel, timeToMinutes(vWindow.startTime));
+      vArrival = roundUpToBlock(vArrival);
       vArrival = adjustForBreaks(vArrival, vClient.visitDurationMinutes, worker);
 
       if (vArrival + vClient.visitDurationMinutes > timeToMinutes(vWindow.endTime) ||
