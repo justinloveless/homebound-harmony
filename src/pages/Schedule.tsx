@@ -247,14 +247,19 @@ export default function Schedule() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Schedule</h1>
           <p className="text-sm text-muted-foreground">
-            {lastSchedule
-              ? `Week of ${lastSchedule.weekStartDate} • ${lastSchedule.totalTravelMinutes} min total travel`
-              : 'Generate an optimized weekly schedule'}
+            {refining
+              ? refineProgress
+              : lastSchedule
+                ? `Week of ${lastSchedule.weekStartDate} • ${lastSchedule.totalTravelMinutes} min total travel`
+                : 'Generate an optimized weekly schedule'}
           </p>
         </div>
-        <Button onClick={handleGenerate} disabled={!canGenerate}>
-          <RotateCw className="w-4 h-4 mr-2" />
-          {lastSchedule ? 'Regenerate' : 'Generate Schedule'}
+        <Button onClick={handleGenerate} disabled={!canGenerate || refining}>
+          {refining ? (
+            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</>
+          ) : (
+            <><RotateCw className="w-4 h-4 mr-2" /> {lastSchedule ? 'Regenerate' : 'Generate Schedule'}</>
+          )}
         </Button>
       </div>
 
