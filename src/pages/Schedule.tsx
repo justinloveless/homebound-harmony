@@ -9,6 +9,7 @@ import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek } from '@/types
 import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
+import { formatTime } from '@/lib/format-time';
 
 function getMonday(): string {
   const d = new Date();
@@ -95,7 +96,7 @@ export default function Schedule() {
                   <CardContent>
                     <div className="flex gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {day.totalTravelMinutes}m travel</span>
-                      <span>{day.leaveHomeTime} – {day.arriveHomeTime}</span>
+                      <span>{formatTime(day.leaveHomeTime)} – {formatTime(day.arriveHomeTime)}</span>
                     </div>
                     <div className="mt-2 space-y-1">
                       {day.visits.map((v, i) => {
@@ -104,7 +105,7 @@ export default function Schedule() {
                           <div key={i} className="text-xs flex items-center gap-2">
                             <span className="w-4 h-4 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
                             <span className="truncate">{client?.name}</span>
-                            <span className="text-muted-foreground ml-auto shrink-0">{v.startTime}</span>
+                            <span className="text-muted-foreground ml-auto shrink-0">{formatTime(v.startTime)}</span>
                           </div>
                         );
                       })}
@@ -212,7 +213,7 @@ export default function Schedule() {
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">🏠</div>
                       <div>
                         <p className="font-medium text-foreground">Leave Home</p>
-                        <p>{selectedDaySchedule.leaveHomeTime}</p>
+                        <p>{formatTime(selectedDaySchedule.leaveHomeTime)}</p>
                       </div>
                     </div>
                     {selectedDaySchedule.visits.map((visit, i) => {
@@ -228,7 +229,7 @@ export default function Schedule() {
                             <div className="flex-1">
                               <p className="font-medium">{client?.name}</p>
                               <p className="text-muted-foreground text-xs">{client?.address}</p>
-                              <p className="text-muted-foreground text-xs">{visit.startTime} – {visit.endTime} ({client?.visitDurationMinutes}min visit)</p>
+                              <p className="text-muted-foreground text-xs">{formatTime(visit.startTime)} – {formatTime(visit.endTime)} ({client?.visitDurationMinutes}min visit)</p>
                             </div>
                           </div>
                         </div>
@@ -238,7 +239,7 @@ export default function Schedule() {
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">🏠</div>
                       <div>
                         <p className="font-medium text-foreground">Arrive Home</p>
-                        <p>{selectedDaySchedule.arriveHomeTime}</p>
+                        <p>{formatTime(selectedDaySchedule.arriveHomeTime)}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -246,6 +247,7 @@ export default function Schedule() {
 
                 <RouteMap
                   workerAddress={worker.homeAddress}
+                  workerCoords={worker.homeCoords}
                   visits={selectedDaySchedule.visits}
                   clients={clients}
                 />

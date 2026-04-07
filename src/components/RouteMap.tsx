@@ -1,102 +1,134 @@
 import { useEffect, useRef } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { type Client, type ScheduledVisit } from '@/types/models';
+import { type Client, type ScheduledVisit, type Coords } from '@/types/models';
 import { MapPin } from 'lucide-react';
+import { waitForGoogle } from '@/lib/google-maps';
+import { formatTime } from '@/lib/format-time';
 
 interface RouteMapProps {
   workerAddress: string;
+  workerCoords?: Coords;
   visits: ScheduledVisit[];
   clients: Client[];
 }
 
-// Simple hash-based pseudo-coordinates from address string (fallback when no geocoding)
-function pseudoCoords(address: string, index: number): [number, number] {
-  // Generate deterministic but spread-out coordinates based on address
-  let hash = 0;
-  for (let i = 0; i < address.length; i++) {
-    hash = (hash << 5) - hash + address.charCodeAt(i);
-    hash |= 0;
-  }
-  const lat = 40.0 + (hash % 1000) / 10000 + index * 0.005;
-  const lng = -74.0 + ((hash >> 10) % 1000) / 10000 + index * 0.005;
-  return [lat, lng];
-}
-
-export default function RouteMap({ workerAddress, visits, clients }: RouteMapProps) {
+export default function RouteMap({ workerAddress, workerCoords, visits, clients }: RouteMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstance = useRef<L.Map | null>(null);
+  const mapInstance = useRef<google.maps.Map | null>(null);
+  const directionsRenderer = useRef<google.maps.DirectionsRenderer | null>(null);
 
   useEffect(() => {
     if (!mapRef.current || visits.length === 0) return;
 
-    // Clean up previous map
-    if (mapInstance.current) {
-      mapInstance.current.remove();
-      mapInstance.current = null;
+    let cancelled = false;
+
+    async function init() {
+      const g = await waitForGoogle();
+      if (cancelled || !mapRef.current) return;
+
+      // Build waypoints from visit order
+      const visitClients = visits.map(v => clients.find(c => c.id === v.clientId)).filter(Boolean) as Client[];
+
+      // Create map
+      const center = workerCoords
+        ? { lat: workerCoords.lat, lng: workerCoords.lon }
+        : { lat: 40.0, lng: -74.0 };
+
+      const map = new g.maps.Map(mapRef.current, {
+        center,
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+      });
+      mapInstance.current = map;
+
+      // Directions
+      const renderer = new g.maps.DirectionsRenderer({
+        map,
+        suppressMarkers: false,
+        polylineOptions: { strokeColor: '#0891b2', strokeWeight: 4, strokeOpacity: 0.8 },
+      });
+      directionsRenderer.current = renderer;
+
+      const directionsService = new g.maps.DirectionsService();
+
+      const origin = workerAddress;
+      const destination = workerAddress; // return home
+      const waypoints: google.maps.DirectionsWaypoint[] = visitClients.map(c => ({
+        location: c.address,
+        stopover: true,
+      }));
+
+      try {
+        const result = await directionsService.route({
+          origin,
+          destination,
+          waypoints,
+          optimizeWaypoints: false, // keep our optimized order
+          travelMode: g.maps.TravelMode.DRIVING,
+        });
+        renderer.setDirections(result);
+
+        // Add info windows for each stop
+        const route = result.routes[0];
+        if (route?.legs) {
+          route.legs.forEach((leg, i) => {
+            if (i === 0) {
+              // Home start marker info
+            }
+            if (i < visits.length) {
+              const visit = visits[i];
+              const client = visitClients[i];
+              if (client && leg.end_location) {
+                const infoWindow = new g.maps.InfoWindow({
+                  content: `<div style="font-size:13px;max-width:200px;"><b>${i + 1}. ${client.name}</b><br/>${formatTime(visit.startTime)} – ${formatTime(visit.endTime)}<br/><span style="color:#666;">${client.address}</span></div>`,
+                });
+                const marker = new g.maps.Marker({
+                  position: leg.end_location,
+                  map,
+                  label: { text: String(i + 1), color: 'white', fontWeight: 'bold' },
+                });
+                marker.addListener('click', () => infoWindow.open(map, marker));
+              }
+            }
+          });
+        }
+      } catch (err) {
+        console.error('Directions request failed:', err);
+        // Fallback: just show markers without route
+        if (workerCoords) {
+          new g.maps.Marker({
+            position: { lat: workerCoords.lat, lng: workerCoords.lon },
+            map,
+            label: '🏠',
+          });
+        }
+        visitClients.forEach((c, i) => {
+          if (c.coords) {
+            new g.maps.Marker({
+              position: { lat: c.coords.lat, lng: c.coords.lon },
+              map,
+              label: String(i + 1),
+            });
+          }
+        });
+      }
     }
 
-    const map = L.map(mapRef.current).setView([40.0, -74.0], 12);
-    mapInstance.current = map;
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
-
-    const points: [number, number][] = [];
-
-    // Home marker
-    const homeCoords = pseudoCoords(workerAddress, 0);
-    points.push(homeCoords);
-    L.marker(homeCoords, {
-      icon: L.divIcon({
-        html: '<div style="background:#0891b2;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);">🏠</div>',
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-        className: '',
-      }),
-    }).addTo(map).bindPopup(`<b>Home</b><br/>${workerAddress}`);
-
-    // Visit markers
-    visits.forEach((visit, i) => {
-      const client = clients.find(c => c.id === visit.clientId);
-      if (!client) return;
-      const coords = pseudoCoords(client.address, i + 1);
-      points.push(coords);
-
-      L.marker(coords, {
-        icon: L.divIcon({
-          html: `<div style="background:#0d9488;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.3);">${i + 1}</div>`,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14],
-          className: '',
-        }),
-      }).addTo(map).bindPopup(`<b>${client.name}</b><br/>${client.address}<br/>${visit.startTime} – ${visit.endTime}`);
-    });
-
-    // Return home
-    points.push(homeCoords);
-
-    // Draw route line
-    L.polyline(points, { color: '#0891b2', weight: 3, opacity: 0.7, dashArray: '8 4' }).addTo(map);
-
-    // Fit bounds
-    if (points.length > 1) {
-      map.fitBounds(L.latLngBounds(points.map(p => L.latLng(p[0], p[1]))), { padding: [30, 30] });
-    }
+    init();
 
     return () => {
-      if (mapInstance.current) {
-        mapInstance.current.remove();
-        mapInstance.current = null;
+      cancelled = true;
+      if (directionsRenderer.current) {
+        directionsRenderer.current.setMap(null);
+        directionsRenderer.current = null;
       }
+      mapInstance.current = null;
     };
-  }, [workerAddress, visits, clients]);
+  }, [workerAddress, workerCoords, visits, clients]);
 
-  if (visits.length === 0) {
-    return null;
-  }
+  if (visits.length === 0) return null;
 
   return (
     <Card>
@@ -107,9 +139,6 @@ export default function RouteMap({ workerAddress, visits, clients }: RouteMapPro
       </CardHeader>
       <CardContent>
         <div ref={mapRef} className="h-[350px] rounded-lg overflow-hidden border" />
-        <p className="text-[10px] text-muted-foreground mt-2">
-          Map shows approximate positions. For accurate routing, enter real addresses.
-        </p>
       </CardContent>
     </Card>
   );
