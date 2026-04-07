@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
 import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, DAYS_OF_WEEK, DAY_LABELS } from '@/types/models';
+import { AddressSearch } from '@/components/AddressSearch';
 import { toast } from 'sonner';
 
 const emptyClient = (): Client => ({
