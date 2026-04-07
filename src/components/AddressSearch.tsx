@@ -11,7 +11,7 @@ interface NominatimResult {
 
 interface AddressSearchProps {
   value: string;
-  onChange: (address: string) => void;
+  onChange: (address: string, coords?: { lat: number; lon: number }) => void;
   placeholder?: string;
   id?: string;
 }
