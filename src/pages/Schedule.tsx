@@ -281,39 +281,43 @@ export default function Schedule() {
           </TabsList>
 
           <TabsContent value="weekly" className="space-y-4 mt-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {lastSchedule.days.length === 0 && (
-                <p className="text-sm text-muted-foreground col-span-full">No visits could be scheduled. Check client availability windows and worker hours.</p>
-              )}
-              {lastSchedule.days.map(day => (
-                <Card key={day.day} className="cursor-pointer hover:shadow-md transition-shadow"
-                  onClick={() => setSelectedDay(day.day)}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">{DAY_LABELS[day.day]}</CardTitle>
-                      <Badge variant="secondary">{day.visits.length} visits</Badge>
+            <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden border">
+              {DAYS_OF_WEEK.map(day => {
+                const daySchedule = lastSchedule.days.find(d => d.day === day);
+                const isDayOff = worker.daysOff.includes(day);
+                return (
+                  <div key={day} className={`flex flex-col min-h-[180px] ${isDayOff ? 'bg-muted/40' : 'bg-card'}`}>
+                    <div className={`px-2 py-1.5 border-b text-center ${isDayOff ? 'bg-muted/60' : 'bg-muted/30'}`}>
+                      <p className="text-xs font-semibold">{DAY_LABELS[day]}</p>
+                      {daySchedule && (
+                        <p className="text-[10px] text-muted-foreground">{daySchedule.visits.length} visits</p>
+                      )}
                     </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex gap-4 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {day.totalTravelMinutes}m travel</span>
-                      <span>{formatTime(day.leaveHomeTime)} – {formatTime(day.arriveHomeTime)}</span>
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      {day.visits.map((v, i) => {
+                    <div className="flex-1 p-1.5 space-y-1 overflow-y-auto">
+                      {isDayOff && !daySchedule && (
+                        <p className="text-[10px] text-muted-foreground text-center mt-4 italic">Day off</p>
+                      )}
+                      {daySchedule?.visits.map((v, i) => {
                         const client = clients.find(c => c.id === v.clientId);
                         return (
-                          <div key={i} className="text-xs flex items-center gap-2">
-                            <span className="w-4 h-4 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
-                            <span className="truncate">{client?.name}</span>
-                            <span className="text-muted-foreground ml-auto shrink-0">{formatTime(v.startTime)}</span>
+                          <div key={i}
+                            className="rounded px-1.5 py-1 bg-primary/10 cursor-pointer hover:bg-primary/20 transition-colors"
+                            onClick={() => { setSelectedDay(day); }}
+                          >
+                            <p className="text-[11px] font-medium truncate">{client?.name}</p>
+                            <p className="text-[10px] text-muted-foreground">{formatTime(v.startTime)}</p>
                           </div>
                         );
                       })}
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    {daySchedule && (
+                      <div className="px-1.5 py-1 border-t text-[10px] text-muted-foreground text-center">
+                        {daySchedule.totalTravelMinutes}m · {formatTime(daySchedule.leaveHomeTime)}–{formatTime(daySchedule.arriveHomeTime)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <Card>
