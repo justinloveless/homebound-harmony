@@ -49,7 +49,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateWorker = useCallback((worker: WorkerProfile) => {
-    setWorkspace(prev => { const next = { ...prev, worker }; persist(next); return next; });
+    setWorkspace(prev => {
+      const next = { ...prev, worker };
+      next.travelTimes = recalcTravelTimes(next);
+      persist(next);
+      return next;
+    });
   }, [persist]);
 
   const setClients = useCallback((clients: Client[]) => {
