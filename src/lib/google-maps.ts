@@ -243,14 +243,15 @@ export async function getTimeDependentTravelTimes(
   addresses: string[],
   departureDate: Date,
   onProgress?: (msg: string) => void,
-): Promise<{ travelMinutes: (number | null)[]; durationInTraffic: (number | null)[] }> {
-  if (addresses.length < 2) return { travelMinutes: [], durationInTraffic: [] };
+): Promise<{ travelMinutes: (number | null)[]; durationInTraffic: (number | null)[]; distanceMiles: (number | null)[] }> {
+  if (addresses.length < 2) return { travelMinutes: [], durationInTraffic: [], distanceMiles: [] };
 
   await waitForGoogle();
   const service = new google.maps.DistanceMatrixService();
 
   const travelMinutes: (number | null)[] = [];
   const durationInTraffic: (number | null)[] = [];
+  const distanceMiles: (number | null)[] = [];
 
   // Calculate each sequential leg with departure time
   let currentDepartureTime = departureDate;
