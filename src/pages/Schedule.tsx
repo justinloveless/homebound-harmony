@@ -15,12 +15,16 @@ import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
 import { getTimeDependentTravelTimes } from '@/lib/google-maps';
 
-/** Popup state for adding a new event by clicking on the weekly calendar */
-interface NewEventPopup {
+/** Popup state for adding/editing an event on the weekly calendar */
+interface EventPopup {
+  mode: 'new' | 'edit';
   day: DayOfWeek;
   startTime: string; // "HH:MM"
   duration: number; // minutes
   clientId: string;
+  // For edit mode: original day & visit index
+  originalDay?: DayOfWeek;
+  originalIndex?: number;
   // Position for the popup
   x: number;
   y: number;
