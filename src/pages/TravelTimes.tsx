@@ -1,15 +1,22 @@
+/// <reference types="google.maps" />
+import { useState } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { travelKey, DEFAULT_TRAVEL_TIME } from '@/types/models';
+import { getDistanceMatrixSDK } from '@/lib/google-maps';
+import { toast } from 'sonner';
+import { RefreshCw, Loader2 } from 'lucide-react';
 
 export default function TravelTimes() {
   const { workspace, setTravelTimes } = useWorkspace();
   const { clients, travelTimes } = workspace;
+  const [calculating, setCalculating] = useState(false);
 
   const locations = [
-    { id: 'home', name: '🏠 Home' },
-    ...clients.map(c => ({ id: c.id, name: c.name })),
+    { id: 'home', name: '🏠 Home', address: workspace.worker.homeAddress },
+    ...clients.map(c => ({ id: c.id, name: c.name, address: c.address })),
   ];
 
   const getValue = (a: string, b: string) => travelTimes[travelKey(a, b)] ?? DEFAULT_TRAVEL_TIME;
@@ -17,6 +24,39 @@ export default function TravelTimes() {
   const handleChange = (a: string, b: string, value: number) => {
     const key = travelKey(a, b);
     setTravelTimes({ ...travelTimes, [key]: value });
+  };
+
+  const handleCalculateAll = async () => {
+    const withAddresses = locations.filter(l => l.address.trim());
+    if (withAddresses.length < 2) {
+      toast.error('Need at least 2 locations with addresses');
+      return;
+    }
+
+    setCalculating(true);
+    try {
+      const addresses = withAddresses.map(l => l.address);
+      // Use the same list for origins and destinations to get the full matrix
+      const results = await getDistanceMatrixSDK(addresses, addresses);
+
+      const updated = { ...travelTimes };
+      for (let i = 0; i < withAddresses.length; i++) {
+        for (let j = i + 1; j < withAddresses.length; j++) {
+          const duration = results[i][j];
+          if (duration !== null) {
+            updated[travelKey(withAddresses[i].id, withAddresses[j].id)] = duration;
+          }
+        }
+      }
+
+      setTravelTimes(updated);
+      toast.success(`Calculated ${withAddresses.length * (withAddresses.length - 1) / 2} travel times via Google Maps`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to calculate travel times. Check your API key and addresses.');
+    } finally {
+      setCalculating(false);
+    }
   };
 
   if (clients.length === 0) {
@@ -35,9 +75,15 @@ export default function TravelTimes() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Travel Times</h1>
-        <p className="text-sm text-muted-foreground">Estimated drive time in minutes between locations</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Travel Times</h1>
+          <p className="text-sm text-muted-foreground">Estimated drive time in minutes between locations</p>
+        </div>
+        <Button onClick={handleCalculateAll} disabled={calculating}>
+          {calculating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+          {calculating ? 'Calculating...' : 'Calculate via Google Maps'}
+        </Button>
       </div>
 
       <Card>
@@ -80,7 +126,7 @@ export default function TravelTimes() {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        Default: {DEFAULT_TRAVEL_TIME} minutes. Travel times are bidirectional — updating one direction updates both.
+        Default: {DEFAULT_TRAVEL_TIME} minutes. Click "Calculate via Google Maps" to auto-fill using real driving times. You can still manually override any value.
       </p>
     </div>
   );
