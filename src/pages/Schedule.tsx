@@ -4,9 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { generateWeekSchedule } from '@/lib/scheduler';
-import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek } from '@/types/models';
-import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { generateWeekSchedule, recalcDaySchedule } from '@/lib/scheduler';
+import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek, type WeekSchedule, type DaySchedule } from '@/types/models';
+import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
@@ -23,7 +24,6 @@ export default function Schedule() {
   const { worker, clients, travelTimes, lastSchedule } = workspace;
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
 
-  // Compute scheduled vs unscheduled clients
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
     const scheduledIds = new Set(
@@ -45,6 +45,90 @@ export default function Schedule() {
   };
 
   const selectedDaySchedule = lastSchedule?.days.find(d => d.day === selectedDay);
+
+  // --- Manual editing helpers ---
+  const updateDayInSchedule = (updatedDay: DaySchedule | null, originalDay: DayOfWeek) => {
+    if (!lastSchedule) return;
+    let newDays: DaySchedule[];
+    if (updatedDay) {
+      const exists = lastSchedule.days.some(d => d.day === originalDay);
+      if (exists) {
+        newDays = lastSchedule.days.map(d => d.day === originalDay ? updatedDay : d);
+      } else {
+        newDays = [...lastSchedule.days, updatedDay].sort(
+          (a, b) => DAYS_OF_WEEK.indexOf(a.day) - DAYS_OF_WEEK.indexOf(b.day)
+        );
+      }
+    } else {
+      newDays = lastSchedule.days.filter(d => d.day !== originalDay);
+    }
+
+    const totalTravel = newDays.reduce((s, d) => s + d.totalTravelMinutes, 0);
+    const totalAway = newDays.reduce((s, d) => {
+      const leave = d.leaveHomeTime.split(':').map(Number);
+      const arrive = d.arriveHomeTime.split(':').map(Number);
+      return s + ((arrive[0] * 60 + arrive[1]) - (leave[0] * 60 + leave[1]));
+    }, 0);
+
+    setSchedule({ ...lastSchedule, days: newDays, totalTravelMinutes: totalTravel, totalTimeAwayMinutes: totalAway });
+  };
+
+  const moveVisit = (daySchedule: DaySchedule, visitIndex: number, direction: -1 | 1) => {
+    const newVisits = [...daySchedule.visits];
+    const targetIdx = visitIndex + direction;
+    if (targetIdx < 0 || targetIdx >= newVisits.length) return;
+    [newVisits[visitIndex], newVisits[targetIdx]] = [newVisits[targetIdx], newVisits[visitIndex]];
+
+    const recalced = recalcDaySchedule(newVisits, daySchedule.day, daySchedule.date, worker, clients, travelTimes);
+    updateDayInSchedule(recalced, daySchedule.day);
+  };
+
+  const removeVisit = (daySchedule: DaySchedule, visitIndex: number) => {
+    const newVisits = daySchedule.visits.filter((_, i) => i !== visitIndex);
+    if (newVisits.length === 0) {
+      updateDayInSchedule(null, daySchedule.day);
+    } else {
+      const recalced = recalcDaySchedule(newVisits, daySchedule.day, daySchedule.date, worker, clients, travelTimes);
+      updateDayInSchedule(recalced, daySchedule.day);
+    }
+    toast.success('Visit removed');
+  };
+
+  const addClientToDay = (clientId: string, day: DayOfWeek) => {
+    if (!lastSchedule) return;
+    const client = clients.find(c => c.id === clientId);
+    if (!client) return;
+
+    const existingDay = lastSchedule.days.find(d => d.day === day);
+    const existingVisits = existingDay ? [...existingDay.visits] : [];
+
+    // Add with placeholder times - recalc will fix them
+    existingVisits.push({
+      clientId,
+      startTime: '00:00',
+      endTime: '00:00',
+      travelTimeFromPrev: 0,
+    });
+
+    const date = existingDay?.date ?? (() => {
+      const dayIndex = DAYS_OF_WEEK.indexOf(day);
+      const dateObj = new Date(lastSchedule.weekStartDate);
+      dateObj.setDate(dateObj.getDate() + dayIndex);
+      return dateObj.toISOString().split('T')[0];
+    })();
+
+    const recalced = recalcDaySchedule(existingVisits, day, date, worker, clients, travelTimes);
+    updateDayInSchedule(recalced, day);
+    toast.success(`${client.name} added to ${DAY_LABELS[day]}`);
+  };
+
+  // Clients not on the currently selected day
+  const availableForDay = useMemo(() => {
+    if (!selectedDay || !lastSchedule) return [];
+    const daySchedule = lastSchedule.days.find(d => d.day === selectedDay);
+    const onDay = new Set(daySchedule?.visits.map(v => v.clientId) ?? []);
+    return clients.filter(c => !onDay.has(c.id));
+  }, [selectedDay, lastSchedule, clients]);
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -225,12 +309,26 @@ export default function Schedule() {
                             <Clock className="w-3 h-3" /> {visit.travelTimeFromPrev} min drive
                           </div>
                           <div className="flex items-center gap-3 text-sm">
-                            <div className="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center text-secondary font-bold text-xs">{i + 1}</div>
-                            <div className="flex-1">
+                            <div className="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center text-secondary font-bold text-xs shrink-0">{i + 1}</div>
+                            <div className="flex-1 min-w-0">
                               <p className="font-medium">{client?.name}</p>
-                              <p className="text-muted-foreground text-xs">{client?.address}</p>
-                              <p className="text-muted-foreground text-xs">{formatTime(visit.startTime)} – {formatTime(visit.endTime)} ({client?.visitDurationMinutes}min visit)</p>
+                              <p className="text-muted-foreground text-xs truncate">{client?.address}</p>
+                              <p className="text-muted-foreground text-xs">{formatTime(visit.startTime)} – {formatTime(visit.endTime)} ({client?.visitDurationMinutes}min)</p>
                             </div>
+                            <div className="flex flex-col gap-1 shrink-0">
+                              <Button variant="ghost" size="icon" className="h-6 w-6" disabled={i === 0}
+                                onClick={() => moveVisit(selectedDaySchedule, i, -1)}>
+                                <ArrowUp className="w-3 h-3" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" disabled={i === selectedDaySchedule.visits.length - 1}
+                                onClick={() => moveVisit(selectedDaySchedule, i, 1)}>
+                                <ArrowDown className="w-3 h-3" />
+                              </Button>
+                            </div>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive shrink-0"
+                              onClick={() => removeVisit(selectedDaySchedule, i)}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
                           </div>
                         </div>
                       );
@@ -242,6 +340,24 @@ export default function Schedule() {
                         <p>{formatTime(selectedDaySchedule.arriveHomeTime)}</p>
                       </div>
                     </div>
+
+                    {availableForDay.length > 0 && (
+                      <div className="pt-3 border-t">
+                        <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                          <Plus className="w-3 h-3" /> Add a client to this day
+                        </p>
+                        <Select onValueChange={(id) => addClientToDay(id, selectedDaySchedule.day)}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Select a client..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableForDay.map(c => (
+                              <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
