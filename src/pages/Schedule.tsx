@@ -213,7 +213,7 @@ export default function Schedule() {
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">🏠</div>
                       <div>
                         <p className="font-medium text-foreground">Leave Home</p>
-                        <p>{selectedDaySchedule.leaveHomeTime}</p>
+                        <p>{formatTime(selectedDaySchedule.leaveHomeTime)}</p>
                       </div>
                     </div>
                     {selectedDaySchedule.visits.map((visit, i) => {
