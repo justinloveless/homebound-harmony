@@ -118,6 +118,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const persist = useCallback((ws: Workspace) => {
     setWorkspace(ws);
     saveWorkspace(ws);
+    // Auto-save to linked file if enabled
+    if (getCurrentFileHandle()) {
+      autoSaveToFile(ws);
+    }
   }, []);
 
   const updateWorker = useCallback((worker: WorkerProfile) => {
