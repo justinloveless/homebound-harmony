@@ -818,12 +818,16 @@ export default function Schedule() {
 
           <TabsContent value="daily" className="space-y-4 mt-4">
             <div className="flex gap-2 flex-wrap">
-              {lastSchedule.days.map(day => (
-                <Button key={day.day} variant={selectedDay === day.day ? 'default' : 'outline'} size="sm"
-                  onClick={() => setSelectedDay(day.day)}>
-                  {DAY_LABELS[day.day]}
-                </Button>
-              ))}
+              {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).map(day => {
+                const dayData = lastSchedule.days.find(d => d.day === day);
+                const visitCount = dayData?.visits.length ?? 0;
+                return (
+                  <Button key={day} variant={selectedDay === day ? 'default' : 'outline'} size="sm"
+                    onClick={() => setSelectedDay(day)}>
+                    {DAY_LABELS[day]} {visitCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{visitCount}</Badge>}
+                  </Button>
+                );
+              })}
             </div>
 
             {selectedDaySchedule ? (
