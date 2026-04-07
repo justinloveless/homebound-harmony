@@ -26,6 +26,7 @@ export default function Schedule() {
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
   const [refining, setRefining] = useState(false);
   const [refineProgress, setRefineProgress] = useState('');
+  const calendarScrollRef = useRef<HTMLDivElement>(null);
 
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
