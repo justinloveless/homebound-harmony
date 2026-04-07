@@ -16,6 +16,13 @@ export const DAY_LABELS: Record<DayOfWeek, string> = {
 export type Frequency = 'weekly' | 'biweekly' | 'monthly';
 export type SchedulePeriod = 'week' | '2weeks' | 'month';
 export type Priority = 'high' | 'medium' | 'low';
+export type SchedulingStrategy = 'pack' | 'alternate' | 'spread';
+
+export const STRATEGY_LABELS: Record<SchedulingStrategy, string> = {
+  pack: 'Pack days (Mon-Tue, Wed-Thu)',
+  alternate: 'Alternate days (Mon/Wed, Tue/Thu)',
+  spread: 'Spread evenly across the week',
+};
 
 export const PERIOD_LABELS: Record<SchedulePeriod, string> = {
   week: 'per week',
