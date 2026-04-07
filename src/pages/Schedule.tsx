@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { generateWeekSchedule } from '@/lib/scheduler';
 import { DAY_LABELS, DAYS_OF_WEEK, type DayOfWeek } from '@/types/models';
-import { CalendarDays, Clock, MapPin, RotateCw } from 'lucide-react';
+import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
 
@@ -21,6 +21,18 @@ export default function Schedule() {
   const { workspace, setSchedule } = useWorkspace();
   const { worker, clients, travelTimes, lastSchedule } = workspace;
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
+
+  // Compute scheduled vs unscheduled clients
+  const { scheduledClients, unscheduledClients } = useMemo(() => {
+    if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
+    const scheduledIds = new Set(
+      lastSchedule.days.flatMap(d => d.visits.map(v => v.clientId))
+    );
+    return {
+      scheduledClients: clients.filter(c => scheduledIds.has(c.id)),
+      unscheduledClients: clients.filter(c => !scheduledIds.has(c.id)),
+    };
+  }, [lastSchedule, clients]);
 
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
 
@@ -117,9 +129,63 @@ export default function Schedule() {
                     <p className="text-muted-foreground">Scheduled Days</p>
                     <p className="text-xl font-bold">{lastSchedule.days.length}</p>
                   </div>
+                  <div>
+                    <p className="text-muted-foreground">Clients Scheduled</p>
+                    <p className="text-xl font-bold">{scheduledClients.length} / {clients.length}</p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    Scheduled ({scheduledClients.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {scheduledClients.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No clients scheduled</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {scheduledClients.map(c => {
+                        const day = lastSchedule.days.find(d => d.visits.some(v => v.clientId === c.id));
+                        return (
+                          <div key={c.id} className="text-xs flex items-center justify-between">
+                            <span className="truncate">{c.name}</span>
+                            <Badge variant="outline" className="text-[10px] shrink-0">{day ? DAY_LABELS[day.day] : ''}</Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {unscheduledClients.length > 0 && (
+                <Card className="border-destructive/30">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-destructive" />
+                      Not Scheduled ({unscheduledClients.length})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-1">
+                      {unscheduledClients.map(c => (
+                        <div key={c.id} className="text-xs flex items-center justify-between">
+                          <span className="truncate">{c.name}</span>
+                          <Badge variant="outline" className="text-[10px] shrink-0">{c.frequency}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-2">These clients couldn't be fit into the schedule. Check their availability windows or worker hours.</p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="daily" className="space-y-4 mt-4">
