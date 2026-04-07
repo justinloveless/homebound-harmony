@@ -176,15 +176,86 @@ export default function Schedule() {
   const selectedDaySchedule = lastSchedule?.days.find(d => d.day === selectedDay);
 
   // --- Manual editing helpers ---
-  const updateDayInSchedule = (updatedDay: DaySchedule | null, originalDay: DayOfWeek) => {
+  /** Refine a single day's travel times via Google Maps */
+  const refineSingleDay = async (daySchedule: DaySchedule) => {
+    if (daySchedule.visits.length === 0) return daySchedule;
+
+    try {
+      const addresses: string[] = [worker.homeAddress];
+      const visitClients = daySchedule.visits.map(v => clients.find(c => c.id === v.clientId)).filter(Boolean);
+      for (const c of visitClients) {
+        if (c) addresses.push(c.address);
+      }
+      addresses.push(worker.homeAddress);
+
+      const departureDate = new Date(`${daySchedule.date}T${daySchedule.leaveHomeTime}:00`);
+      const { durationInTraffic, distanceMiles } = await getTimeDependentTravelTimes(addresses, departureDate);
+
+      const workStart = worker.workingHours.startTime.split(':').map(Number);
+      const workStartMin = workStart[0] * 60 + workStart[1];
+      let currentTime = workStartMin;
+      const refinedVisits: ScheduledVisit[] = [];
+
+      for (let i = 0; i < daySchedule.visits.length; i++) {
+        const visit = daySchedule.visits[i];
+        const client = clients.find(c => c.id === visit.clientId);
+        if (!client) continue;
+
+        const travelMin = durationInTraffic[i] ?? visit.travelTimeFromPrev;
+        const windowStart = (() => {
+          const tw = client.timeWindows.find(tw => tw.day === daySchedule.day);
+          return tw ? tw.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) : workStartMin;
+        })();
+
+        let arrival = Math.max(currentTime + travelMin, windowStart);
+        for (const b of worker.breaks) {
+          const bs = b.startTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
+          const be = b.endTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
+          if (arrival < be && arrival + client.visitDurationMinutes > bs) arrival = be;
+        }
+
+        const endMin = arrival + client.visitDurationMinutes;
+        const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        refinedVisits.push({
+          clientId: visit.clientId,
+          startTime: toTime(arrival),
+          endTime: toTime(endMin),
+          travelTimeFromPrev: travelMin,
+          travelDistanceMiFromPrev: distanceMiles[i] ?? undefined,
+        });
+        currentTime = endMin;
+      }
+
+      const travelHome = durationInTraffic[daySchedule.visits.length] ?? 15;
+      const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const totalTravel = refinedVisits.reduce((s, v) => s + v.travelTimeFromPrev, 0) + travelHome;
+
+      return {
+        ...daySchedule,
+        visits: refinedVisits,
+        totalTravelMinutes: totalTravel,
+        leaveHomeTime: refinedVisits.length > 0
+          ? toTime(refinedVisits[0].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) - refinedVisits[0].travelTimeFromPrev)
+          : daySchedule.leaveHomeTime,
+        arriveHomeTime: toTime(currentTime + travelHome),
+      };
+    } catch (err) {
+      console.error('Single day refine failed:', err);
+      return daySchedule;
+    }
+  };
+
+  const updateDayInSchedule = async (updatedDay: DaySchedule | null, originalDay: DayOfWeek) => {
     if (!lastSchedule) return;
     let newDays: DaySchedule[];
     if (updatedDay) {
+      // Refine this day via Google Maps
+      const refined = await refineSingleDay(updatedDay);
       const exists = lastSchedule.days.some(d => d.day === originalDay);
       if (exists) {
-        newDays = lastSchedule.days.map(d => d.day === originalDay ? updatedDay : d);
+        newDays = lastSchedule.days.map(d => d.day === originalDay ? refined : d);
       } else {
-        newDays = [...lastSchedule.days, updatedDay].sort(
+        newDays = [...lastSchedule.days, refined].sort(
           (a, b) => DAYS_OF_WEEK.indexOf(a.day) - DAYS_OF_WEEK.indexOf(b.day)
         );
       }
@@ -231,7 +302,6 @@ export default function Schedule() {
     const existingDay = lastSchedule.days.find(d => d.day === day);
     const existingVisits = existingDay ? [...existingDay.visits] : [];
 
-    // Add with placeholder times - recalc will fix them
     existingVisits.push({
       clientId,
       startTime: '00:00',
@@ -339,7 +409,15 @@ export default function Schedule() {
                           {/* Day header (sticky) */}
                           <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
                             {DAY_LABELS[day]}
-                            {daySchedule && <span className="text-[10px] font-normal text-muted-foreground ml-1">({daySchedule.visits.length})</span>}
+                            {daySchedule && (
+                              <div className="text-[9px] font-normal text-muted-foreground leading-tight">
+                                {daySchedule.visits.length} visits · {daySchedule.totalTravelMinutes}m
+                                {(() => {
+                                  const mi = daySchedule.visits.reduce((s, v) => s + (v.travelDistanceMiFromPrev ?? 0), 0);
+                                  return mi > 0 ? ` · ${mi.toFixed(1)}mi` : '';
+                                })()}
+                              </div>
+                            )}
                           </div>
 
                           {/* Hour grid lines */}
@@ -561,6 +639,26 @@ export default function Schedule() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {/* Daily totals */}
+                    <div className="flex flex-wrap gap-4 text-xs pb-2 border-b">
+                      <div>
+                        <span className="text-muted-foreground">Travel: </span>
+                        <span className="font-semibold">{selectedDaySchedule.totalTravelMinutes} min</span>
+                      </div>
+                      {(() => {
+                        const totalMiles = selectedDaySchedule.visits.reduce((s, v) => s + (v.travelDistanceMiFromPrev ?? 0), 0);
+                        return totalMiles > 0 ? (
+                          <div>
+                            <span className="text-muted-foreground">Distance: </span>
+                            <span className="font-semibold">{totalMiles.toFixed(1)} mi</span>
+                          </div>
+                        ) : null;
+                      })()}
+                      <div>
+                        <span className="text-muted-foreground">Away: </span>
+                        <span className="font-semibold">{formatTime(selectedDaySchedule.leaveHomeTime)} – {formatTime(selectedDaySchedule.arriveHomeTime)}</span>
+                      </div>
+                    </div>
                     <div className="flex items-center gap-3 text-sm text-muted-foreground">
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">🏠</div>
                       <div>
