@@ -160,12 +160,15 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground">
             Export your workspace as a JSON file for backup or to sync across devices via Google Drive, iCloud, etc.
           </p>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
+            <Button variant="outline" onClick={handleCopyToClipboard}>
+              <Copy className="w-4 h-4 mr-2" /> Copy to Clipboard
+            </Button>
             <Button variant="outline" onClick={handleExport}>
-              <Download className="w-4 h-4 mr-2" /> Export Workspace
+              <Download className="w-4 h-4 mr-2" /> Export File
             </Button>
             <Button variant="outline" onClick={handleImport}>
-              <Upload className="w-4 h-4 mr-2" /> Import Workspace
+              <Upload className="w-4 h-4 mr-2" /> Import File
             </Button>
           </div>
         </CardContent>
