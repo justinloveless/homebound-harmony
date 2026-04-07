@@ -462,10 +462,14 @@ export function recalcDaySchedule(
 
     const window = getClientWindowForDay(client, day);
     const windowStart = window ? timeToMinutes(window.startTime) : workStart;
-    const windowEnd = window ? timeToMinutes(window.endTime) : workEnd;
 
     const travel = getTravelTime(travelTimes, currentLocationId, client.id);
-    let arrival = Math.max(currentTime + travel, windowStart);
+    const earliest = Math.max(currentTime + travel, windowStart);
+
+    // If the visit already has a manually-set start time, respect it
+    // (as long as it's not before the earliest feasible time)
+    const manualStart = v.startTime !== '00:00' ? timeToMinutes(v.startTime) : 0;
+    let arrival = manualStart > earliest ? manualStart : earliest;
     arrival = roundUpToBlock(arrival);
     arrival = adjustForBreaks(arrival, client.visitDurationMinutes, worker);
 
