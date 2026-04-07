@@ -374,6 +374,31 @@ export default function Schedule() {
     toast.success(`${client.name} added to ${DAY_LABELS[day]}`);
   };
 
+  /** Copy all visits from one day to another */
+  const copyDayTo = (fromDay: DayOfWeek, toDay: DayOfWeek) => {
+    if (!lastSchedule) return;
+    const fromSchedule = lastSchedule.days.find(d => d.day === fromDay);
+    if (!fromSchedule || fromSchedule.visits.length === 0) {
+      toast.error(`No visits on ${DAY_LABELS[fromDay]} to copy`);
+      return;
+    }
+
+    const toDayDate = (() => {
+      const existing = lastSchedule.days.find(d => d.day === toDay);
+      if (existing) return existing.date;
+      const dayIndex = DAYS_OF_WEEK.indexOf(toDay);
+      const dateObj = new Date(lastSchedule.weekStartDate);
+      dateObj.setDate(dateObj.getDate() + dayIndex);
+      return dateObj.toISOString().split('T')[0];
+    })();
+
+    const copiedVisits: ScheduledVisit[] = fromSchedule.visits.map(v => ({ ...v }));
+    const recalced = recalcDaySchedule(copiedVisits, toDay, toDayDate, worker, clients, travelTimes);
+    updateDayInSchedule(recalced, toDay);
+    setCopyMenuDay(null);
+    toast.success(`Copied ${DAY_LABELS[fromDay]} → ${DAY_LABELS[toDay]}`);
+  };
+
   // Clients not on the currently selected day
   const availableForDay = useMemo(() => {
     if (!selectedDay || !lastSchedule) return [];
