@@ -374,7 +374,7 @@ export default function Schedule() {
                   ) : (
                     <div className="space-y-1">
                       {scheduledClients.map(c => {
-                        const day = lastSchedule.days.find(d => d.visits.some(v => v.clientId === c.id));
+                        const clientDays = lastSchedule.days.filter(d => d.visits.some(v => v.clientId === c.id));
                         const group = lastSchedule.clientGroups?.[c.id];
                         return (
                           <div key={c.id} className="text-xs flex items-center justify-between gap-2">
@@ -385,7 +385,9 @@ export default function Schedule() {
                                   {group}
                                 </Badge>
                               )}
-                              <Badge variant="outline" className="text-[10px]">{day ? DAY_LABELS[day.day] : ''}</Badge>
+                              {clientDays.map(d => (
+                                <Badge key={d.day} variant="outline" className="text-[10px]">{DAY_LABELS[d.day]}</Badge>
+                              ))}
                             </div>
                           </div>
                         );
