@@ -107,6 +107,13 @@ export interface WeekSchedule {
   clientGroups?: Record<string, string>;
 }
 
+export interface SavedSchedule {
+  id: string;
+  name: string;
+  savedAt: string; // ISO timestamp
+  schedule: WeekSchedule;
+}
+
 export interface Workspace {
   version: 1;
   worker: WorkerProfile;
@@ -114,6 +121,7 @@ export interface Workspace {
   travelTimes: TravelTimeMatrix;
   travelTimeErrors?: TravelTimeErrors;
   lastSchedule: WeekSchedule | null;
+  savedSchedules?: SavedSchedule[];
 }
 
 export const DEFAULT_WORKSPACE: Workspace = {
