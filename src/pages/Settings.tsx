@@ -6,16 +6,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Download, Upload, Trash2, Plus, Copy } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Download, Upload, Trash2, Plus, Copy, HardDrive, FolderOpen, Save } from 'lucide-react';
 import { DAYS_OF_WEEK, DAY_LABELS, STRATEGY_LABELS, type DayOfWeek, type WorkerProfile, type SchedulingStrategy } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { exportWorkspace, importWorkspace, downloadJson } from '@/lib/storage';
+import { exportWorkspace, importWorkspace, downloadJson, isFileSystemAccessSupported, saveWorkspaceToFile, openWorkspaceFromFile, getCurrentFileHandle, clearFileHandle } from '@/lib/storage';
 import { toast } from 'sonner';
 
 export default function SettingsPage() {
-  const { workspace, updateWorker, replaceWorkspace } = useWorkspace();
+  const { workspace, updateWorker, replaceWorkspace, fileAutoSaveEnabled, setFileAutoSaveEnabled } = useWorkspace();
   const [form, setForm] = useState<WorkerProfile>(workspace.worker);
+  const [linkedFileName, setLinkedFileName] = useState<string | null>(
+    getCurrentFileHandle()?.name ?? null
+  );
 
   const handleSave = () => {
     updateWorker(form);
@@ -81,6 +85,48 @@ export default function SettingsPage() {
     };
     input.click();
   };
+
+  // --- File System Access API handlers ---
+  const handleSaveToFile = async () => {
+    try {
+      const handle = await saveWorkspaceToFile(workspace);
+      setLinkedFileName(handle.name);
+      toast.success(`Saved to ${handle.name}`);
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') toast.error('Failed to save file');
+    }
+  };
+
+  const handleSaveToCurrentFile = async () => {
+    try {
+      const handle = await saveWorkspaceToFile(workspace, getCurrentFileHandle());
+      setLinkedFileName(handle.name);
+      toast.success(`Saved to ${handle.name}`);
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') toast.error('Failed to save file');
+    }
+  };
+
+  const handleOpenFromFile = async () => {
+    try {
+      const { workspace: ws, handle } = await openWorkspaceFromFile();
+      replaceWorkspace(ws);
+      setForm(ws.worker);
+      setLinkedFileName(handle.name);
+      toast.success(`Loaded from ${handle.name}`);
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') toast.error('Failed to open file');
+    }
+  };
+
+  const handleUnlinkFile = () => {
+    clearFileHandle();
+    setLinkedFileName(null);
+    setFileAutoSaveEnabled(false);
+    toast.success('File unlinked');
+  };
+
+  const fsSupported = isFileSystemAccessSupported();
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -168,13 +214,64 @@ export default function SettingsPage() {
 
       <Separator />
 
+      {/* Cloud File Sync */}
+      {fsSupported && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <HardDrive className="w-5 h-5" /> Cloud File Sync
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Save and open your workspace directly from cloud storage folders like iCloud Drive, Google Drive, OneDrive, or Dropbox.
+              Requires their desktop sync app to be installed.
+            </p>
+
+            {linkedFileName && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/50 border text-sm">
+                <HardDrive className="w-4 h-4 text-primary shrink-0" />
+                <span className="flex-1 truncate">Linked: <strong>{linkedFileName}</strong></span>
+                <Button variant="ghost" size="sm" className="h-6 text-xs text-muted-foreground" onClick={handleUnlinkFile}>
+                  Unlink
+                </Button>
+              </div>
+            )}
+
+            <div className="flex gap-3 flex-wrap">
+              {linkedFileName ? (
+                <Button variant="outline" onClick={handleSaveToCurrentFile}>
+                  <Save className="w-4 h-4 mr-2" /> Save to File
+                </Button>
+              ) : null}
+              <Button variant="outline" onClick={handleSaveToFile}>
+                <Save className="w-4 h-4 mr-2" /> {linkedFileName ? 'Save As…' : 'Save to File…'}
+              </Button>
+              <Button variant="outline" onClick={handleOpenFromFile}>
+                <FolderOpen className="w-4 h-4 mr-2" /> Open from File…
+              </Button>
+            </div>
+
+            {linkedFileName && (
+              <div className="flex items-center gap-3">
+                <Switch
+                  checked={fileAutoSaveEnabled}
+                  onCheckedChange={setFileAutoSaveEnabled}
+                />
+                <Label className="text-sm">Auto-save changes to linked file</Label>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Data Management</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Export your workspace as a JSON file for backup or to sync across devices via Google Drive, iCloud, etc.
+            Export your workspace as a JSON file for backup or to sync across devices.
           </p>
           <div className="flex gap-3 flex-wrap">
             <Button variant="outline" onClick={handleCopyToClipboard}>
