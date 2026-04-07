@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
-import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, DAYS_OF_WEEK, DAY_LABELS, type Coords } from '@/types/models';
+import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, type SchedulePeriod, DAYS_OF_WEEK, DAY_LABELS, PERIOD_LABELS, type Coords } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
 import { toast } from 'sonner';
 
@@ -19,7 +19,8 @@ const emptyClient = (): Client => ({
   name: '',
   address: '',
   visitDurationMinutes: 60,
-  frequency: 'weekly',
+  visitsPerPeriod: 1,
+  period: 'week',
   priority: 'medium',
   timeWindows: [],
   notes: '',
