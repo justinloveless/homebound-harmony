@@ -309,6 +309,7 @@ export async function getTimeDependentTravelTimes(
       console.error(`Leg ${i + 1} failed:`, err);
       travelMinutes.push(null);
       durationInTraffic.push(null);
+      distanceMiles.push(null);
     }
 
     // Rate limit between legs
