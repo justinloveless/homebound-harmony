@@ -43,7 +43,10 @@ export interface Client {
   address: string;
   coords?: Coords;
   visitDurationMinutes: number;
-  frequency: Frequency;
+  /** @deprecated Use visitsPerPeriod + period instead */
+  frequency?: Frequency;
+  visitsPerPeriod: number;
+  period: SchedulePeriod;
   priority: Priority;
   timeWindows: TimeWindow[];
   notes: string;
