@@ -258,7 +258,10 @@ export default function Schedule() {
           return tw ? tw.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) : workStartMin;
         })();
 
-        let arrival = Math.max(currentTime + travelMin, windowStart);
+        const earliest = Math.max(currentTime + travelMin, windowStart);
+        // Respect manually-set start times
+        const manualStart = visit.startTime !== '00:00' ? visit.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) : 0;
+        let arrival = manualStart > earliest ? manualStart : earliest;
         for (const b of worker.breaks) {
           const bs = b.startTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
           const be = b.endTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
