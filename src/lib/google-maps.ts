@@ -292,17 +292,18 @@ export async function getTimeDependentTravelTimes(
         const trafficMins = el.duration_in_traffic
           ? Math.round(el.duration_in_traffic.value / 60)
           : baseMins;
+        const miles = Math.round(el.distance.value / 1609.34 * 10) / 10; // meters to miles, 1 decimal
         travelMinutes.push(baseMins);
         durationInTraffic.push(trafficMins);
+        distanceMiles.push(miles);
 
-        // Advance departure time by travel + a placeholder visit duration
-        // (caller will use actual visit durations to refine)
         currentDepartureTime = new Date(
           currentDepartureTime.getTime() + trafficMins * 60 * 1000,
         );
       } else {
         travelMinutes.push(null);
         durationInTraffic.push(null);
+        distanceMiles.push(null);
       }
     } catch (err) {
       console.error(`Leg ${i + 1} failed:`, err);
