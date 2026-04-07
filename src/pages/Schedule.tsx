@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { generateWeekSchedule } from '@/lib/scheduler';
-import { DAY_LABELS, DAYS_OF_WEEK, type DayOfWeek } from '@/types/models';
+import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek } from '@/types/models';
 import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
