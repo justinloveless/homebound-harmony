@@ -5,6 +5,8 @@ import {
   DAYS_OF_WEEK, travelKey, DEFAULT_TRAVEL_TIME, frequencyToVisits,
 } from '@/types/models';
 
+const BLOCK_SIZE = 15; // schedule in 15-minute blocks
+
 function timeToMinutes(t: string): number {
   const [h, m] = t.split(':').map(Number);
   return h * 60 + m;
@@ -14,6 +16,11 @@ function minutesToTime(m: number): string {
   const h = Math.floor(m / 60);
   const mins = m % 60;
   return `${String(h).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+/** Round up to the next 15-minute boundary */
+function roundUpToBlock(minutes: number): number {
+  return Math.ceil(minutes / BLOCK_SIZE) * BLOCK_SIZE;
 }
 
 function getTravelTime(matrix: TravelTimeMatrix, a: string, b: string): number {
@@ -92,6 +99,7 @@ function tryInsertClient(
     }
 
     let arrival = Math.max(prevEndTime + travelToPrev, windowStart);
+    arrival = roundUpToBlock(arrival);
     arrival = adjustForBreaks(arrival, client.visitDurationMinutes, worker);
 
     if (arrival + client.visitDurationMinutes > windowEnd) continue;
@@ -115,6 +123,7 @@ function tryInsertClient(
       const fromId = j === pos ? client.id : newVisits[j - 1].clientId;
       const travel = getTravelTime(travelTimes, fromId, v.clientId);
       let vArrival = Math.max(currentTime + travel, timeToMinutes(vWindow.startTime));
+      vArrival = roundUpToBlock(vArrival);
       vArrival = adjustForBreaks(vArrival, vClient.visitDurationMinutes, worker);
 
       if (vArrival + vClient.visitDurationMinutes > timeToMinutes(vWindow.endTime) ||
@@ -281,6 +290,7 @@ export function generateWeekSchedule(
         const windowStart = timeToMinutes(c.window.startTime);
         const windowEnd = timeToMinutes(c.window.endTime);
         let arrival = Math.max(currentTime + travel, windowStart);
+        arrival = roundUpToBlock(arrival);
         arrival = adjustForBreaks(arrival, c.client.visitDurationMinutes, worker);
 
         if (arrival + c.client.visitDurationMinutes <= windowEnd &&
@@ -372,6 +382,7 @@ export function generateWeekSchedule(
           const travel = getTravelTime(travelTimes, 'home', client.id);
           const windowStart = timeToMinutes(window.startTime);
           let arrival = Math.max(workStart + travel, windowStart);
+          arrival = roundUpToBlock(arrival);
           arrival = adjustForBreaks(arrival, client.visitDurationMinutes, worker);
 
           if (arrival + client.visitDurationMinutes <= timeToMinutes(window.endTime) &&
@@ -455,6 +466,7 @@ export function recalcDaySchedule(
 
     const travel = getTravelTime(travelTimes, currentLocationId, client.id);
     let arrival = Math.max(currentTime + travel, windowStart);
+    arrival = roundUpToBlock(arrival);
     arrival = adjustForBreaks(arrival, client.visitDurationMinutes, worker);
 
     rebuilt.push({
