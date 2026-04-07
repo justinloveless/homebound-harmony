@@ -181,10 +181,52 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const replaceWorkspace = useCallback((ws: Workspace) => { persist(ws); }, [persist]);
 
+  const saveSchedule = useCallback((name: string) => {
+    setWorkspace(prev => {
+      if (!prev.lastSchedule) return prev;
+      const saved: SavedSchedule = {
+        id: crypto.randomUUID(),
+        name,
+        savedAt: new Date().toISOString(),
+        schedule: prev.lastSchedule!,
+      };
+      const next = { ...prev, savedSchedules: [...(prev.savedSchedules ?? []), saved] };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const loadSavedSchedule = useCallback((id: string) => {
+    setWorkspace(prev => {
+      const saved = (prev.savedSchedules ?? []).find(s => s.id === id);
+      if (!saved) return prev;
+      const next = { ...prev, lastSchedule: saved.schedule };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const deleteSavedSchedule = useCallback((id: string) => {
+    setWorkspace(prev => {
+      const next = { ...prev, savedSchedules: (prev.savedSchedules ?? []).filter(s => s.id !== id) };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const renameSavedSchedule = useCallback((id: string, name: string) => {
+    setWorkspace(prev => {
+      const next = { ...prev, savedSchedules: (prev.savedSchedules ?? []).map(s => s.id === id ? { ...s, name } : s) };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
   return (
     <WorkspaceContext.Provider value={{
       workspace, loading, updateWorker, setClients, addClient, updateClient,
       removeClient, setTravelTimes, setTravelTimeErrors, setSchedule, replaceWorkspace,
+      saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule,
     }}>
       {children}
     </WorkspaceContext.Provider>
