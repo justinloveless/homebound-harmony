@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,8 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Pencil, Trash2, Search } from 'lucide-react';
-import { type Client, type TimeWindow, type Frequency, type Priority, DAYS_OF_WEEK, DAY_LABELS } from '@/types/models';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
+import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, DAYS_OF_WEEK, DAY_LABELS } from '@/types/models';
 import { toast } from 'sonner';
 
 const emptyClient = (): Client => ({
@@ -23,10 +24,49 @@ const emptyClient = (): Client => ({
   notes: '',
 });
 
+type QuickPreset = 'custom' | 'everyday' | 'weekdays' | 'weekends' | 'mwf' | 'tth';
+
+const PRESET_LABELS: Record<QuickPreset, string> = {
+  custom: 'Custom',
+  everyday: 'Every day',
+  weekdays: 'Weekdays (Mon–Fri)',
+  weekends: 'Weekends (Sat–Sun)',
+  mwf: 'Mon / Wed / Fri',
+  tth: 'Tue / Thu',
+};
+
+const PRESET_DAYS: Record<Exclude<QuickPreset, 'custom'>, DayOfWeek[]> = {
+  everyday: [...DAYS_OF_WEEK],
+  weekdays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  weekends: ['saturday', 'sunday'],
+  mwf: ['monday', 'wednesday', 'friday'],
+  tth: ['tuesday', 'thursday'],
+};
+
 function TimeWindowEditor({ windows, onChange }: { windows: TimeWindow[]; onChange: (w: TimeWindow[]) => void }) {
-  const addWindow = () => {
-    onChange([...windows, { day: 'monday', startTime: '09:00', endTime: '12:00' }]);
+  const [preset, setPreset] = useState<QuickPreset>('custom');
+  const [selectedDays, setSelectedDays] = useState<DayOfWeek[]>([]);
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('17:00');
+
+  const applyPreset = (p: QuickPreset) => {
+    setPreset(p);
+    if (p !== 'custom') {
+      setSelectedDays(PRESET_DAYS[p]);
+    }
   };
+
+  const applyQuickWindows = () => {
+    const days = preset === 'custom' ? selectedDays : PRESET_DAYS[preset];
+    if (days.length === 0) {
+      toast.error('Select at least one day');
+      return;
+    }
+    const newWindows: TimeWindow[] = days.map(day => ({ day, startTime, endTime }));
+    onChange([...windows, ...newWindows]);
+    toast.success(`Added ${days.length} availability window${days.length > 1 ? 's' : ''}`);
+  };
+
   const removeWindow = (i: number) => onChange(windows.filter((_, idx) => idx !== i));
   const updateWindow = (i: number, field: keyof TimeWindow, value: string) => {
     const updated = [...windows];
@@ -35,34 +75,84 @@ function TimeWindowEditor({ windows, onChange }: { windows: TimeWindow[]; onChan
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <Label className="text-sm font-medium">Availability Windows</Label>
-        <Button type="button" variant="ghost" size="sm" onClick={addWindow}>
-          <Plus className="w-3 h-3 mr-1" /> Add
-        </Button>
-      </div>
-      {windows.map((w, i) => (
-        <div key={i} className="flex items-center gap-2 flex-wrap">
-          <Select value={w.day} onValueChange={v => updateWindow(i, 'day', v)}>
-            <SelectTrigger className="w-24 h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DAYS_OF_WEEK.map(d => (
-                <SelectItem key={d} value={d}>{DAY_LABELS[d]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input type="time" value={w.startTime} onChange={e => updateWindow(i, 'startTime', e.target.value)} className="w-28 h-8 text-xs" />
+    <div className="space-y-3">
+      <Label className="text-sm font-medium">Availability Windows</Label>
+
+      {/* Quick-add section */}
+      <div className="border border-border rounded-lg p-3 space-y-3 bg-muted/30">
+        <p className="text-xs font-medium text-muted-foreground">Quick Add</p>
+        <div className="flex flex-wrap gap-1.5">
+          {(Object.keys(PRESET_LABELS) as QuickPreset[]).map(p => (
+            <Button
+              key={p}
+              type="button"
+              variant={preset === p ? 'default' : 'outline'}
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => applyPreset(p)}
+            >
+              {PRESET_LABELS[p]}
+            </Button>
+          ))}
+        </div>
+
+        {preset === 'custom' && (
+          <div className="flex flex-wrap gap-2">
+            {DAYS_OF_WEEK.map(d => (
+              <label key={d} className="flex items-center gap-1 text-xs cursor-pointer">
+                <Checkbox
+                  checked={selectedDays.includes(d)}
+                  onCheckedChange={(checked) => {
+                    setSelectedDays(prev =>
+                      checked ? [...prev, d] : prev.filter(x => x !== d)
+                    );
+                  }}
+                />
+                {DAY_LABELS[d]}
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-28 h-8 text-xs" />
           <span className="text-xs text-muted-foreground">to</span>
-          <Input type="time" value={w.endTime} onChange={e => updateWindow(i, 'endTime', e.target.value)} className="w-28 h-8 text-xs" />
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeWindow(i)}>
-            <Trash2 className="w-3 h-3" />
+          <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-28 h-8 text-xs" />
+          <Button type="button" size="sm" className="h-8 text-xs" onClick={applyQuickWindows}>
+            <Plus className="w-3 h-3 mr-1" /> Add
           </Button>
         </div>
-      ))}
-      {windows.length === 0 && <p className="text-xs text-muted-foreground">No windows yet. Add at least one.</p>}
+      </div>
+
+      {/* Existing windows list */}
+      {windows.length > 0 && (
+        <div className="space-y-1.5">
+          {windows.map((w, i) => (
+            <div key={i} className="flex items-center gap-2 flex-wrap">
+              <Select value={w.day} onValueChange={v => updateWindow(i, 'day', v)}>
+                <SelectTrigger className="w-24 h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DAYS_OF_WEEK.map(d => (
+                    <SelectItem key={d} value={d}>{DAY_LABELS[d]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input type="time" value={w.startTime} onChange={e => updateWindow(i, 'startTime', e.target.value)} className="w-28 h-8 text-xs" />
+              <span className="text-xs text-muted-foreground">to</span>
+              <Input type="time" value={w.endTime} onChange={e => updateWindow(i, 'endTime', e.target.value)} className="w-28 h-8 text-xs" />
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeWindow(i)}>
+                <Trash2 className="w-3 h-3" />
+              </Button>
+            </div>
+          ))}
+          <Button type="button" variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => onChange([])}>
+            Clear all
+          </Button>
+        </div>
+      )}
+      {windows.length === 0 && <p className="text-xs text-muted-foreground">No windows yet. Use Quick Add above.</p>}
     </div>
   );
 }
@@ -171,6 +261,17 @@ export default function Clients() {
     setDialogOpen(true);
   };
 
+  const handleCopy = (client: Client) => {
+    const copied: Client = {
+      ...client,
+      id: crypto.randomUUID(),
+      name: `${client.name} (copy)`,
+    };
+    setEditing(null);
+    addClient(copied);
+    toast.success(`Copied "${client.name}"`);
+  };
+
   const handleDelete = (id: string) => {
     removeClient(id);
     toast.success('Client removed');
@@ -235,6 +336,9 @@ export default function Clients() {
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleCopy(client)} title="Duplicate client">
+                    <Copy className="w-3.5 h-3.5" />
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(client)}>
                     <Pencil className="w-3.5 h-3.5" />
                   </Button>
