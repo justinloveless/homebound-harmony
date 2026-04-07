@@ -86,6 +86,7 @@ export interface ScheduledVisit {
   startTime: string; // "HH:MM"
   endTime: string;
   travelTimeFromPrev: number; // minutes
+  travelDistanceMiFromPrev?: number; // miles
 }
 
 export interface DaySchedule {

@@ -61,7 +61,7 @@ export default function Schedule() {
         // Build departure time from schedule date + leave time
         const departureDate = new Date(`${day.date}T${day.leaveHomeTime}:00`);
 
-        const { durationInTraffic } = await getTimeDependentTravelTimes(
+        const { durationInTraffic, distanceMiles } = await getTimeDependentTravelTimes(
           addresses,
           departureDate,
           (msg) => setRefineProgress(`${DAY_LABELS[day.day]}: ${msg}`),
@@ -103,6 +103,7 @@ export default function Schedule() {
             startTime: toTime(arrival),
             endTime: toTime(endMin),
             travelTimeFromPrev: travelMin,
+            travelDistanceMiFromPrev: distanceMiles[i] ?? undefined,
           });
 
           currentTime = endMin;
@@ -454,7 +455,7 @@ export default function Schedule() {
                         <div key={i}>
                           <div className="flex items-center gap-2 ml-4 text-[10px] text-muted-foreground py-1">
                             <div className="w-px h-4 bg-border" />
-                            <Clock className="w-3 h-3" /> {visit.travelTimeFromPrev} min drive
+                            <Clock className="w-3 h-3" /> {visit.travelTimeFromPrev} min{visit.travelDistanceMiFromPrev != null ? ` · ${visit.travelDistanceMiFromPrev} mi` : ''} drive
                           </div>
                           <div className="flex items-center gap-3 text-sm">
                             <div className="w-8 h-8 rounded-full bg-secondary/20 flex items-center justify-center text-secondary font-bold text-xs shrink-0">{i + 1}</div>

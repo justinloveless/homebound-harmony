@@ -243,14 +243,15 @@ export async function getTimeDependentTravelTimes(
   addresses: string[],
   departureDate: Date,
   onProgress?: (msg: string) => void,
-): Promise<{ travelMinutes: (number | null)[]; durationInTraffic: (number | null)[] }> {
-  if (addresses.length < 2) return { travelMinutes: [], durationInTraffic: [] };
+): Promise<{ travelMinutes: (number | null)[]; durationInTraffic: (number | null)[]; distanceMiles: (number | null)[] }> {
+  if (addresses.length < 2) return { travelMinutes: [], durationInTraffic: [], distanceMiles: [] };
 
   await waitForGoogle();
   const service = new google.maps.DistanceMatrixService();
 
   const travelMinutes: (number | null)[] = [];
   const durationInTraffic: (number | null)[] = [];
+  const distanceMiles: (number | null)[] = [];
 
   // Calculate each sequential leg with departure time
   let currentDepartureTime = departureDate;
@@ -291,22 +292,24 @@ export async function getTimeDependentTravelTimes(
         const trafficMins = el.duration_in_traffic
           ? Math.round(el.duration_in_traffic.value / 60)
           : baseMins;
+        const miles = Math.round(el.distance.value / 1609.34 * 10) / 10; // meters to miles, 1 decimal
         travelMinutes.push(baseMins);
         durationInTraffic.push(trafficMins);
+        distanceMiles.push(miles);
 
-        // Advance departure time by travel + a placeholder visit duration
-        // (caller will use actual visit durations to refine)
         currentDepartureTime = new Date(
           currentDepartureTime.getTime() + trafficMins * 60 * 1000,
         );
       } else {
         travelMinutes.push(null);
         durationInTraffic.push(null);
+        distanceMiles.push(null);
       }
     } catch (err) {
       console.error(`Leg ${i + 1} failed:`, err);
       travelMinutes.push(null);
       durationInTraffic.push(null);
+      distanceMiles.push(null);
     }
 
     // Rate limit between legs
@@ -315,5 +318,5 @@ export async function getTimeDependentTravelTimes(
     }
   }
 
-  return { travelMinutes, durationInTraffic };
+  return { travelMinutes, durationInTraffic, distanceMiles };
 }
