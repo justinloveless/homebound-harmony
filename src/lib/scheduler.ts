@@ -290,6 +290,7 @@ export function generateWeekSchedule(
         const windowStart = timeToMinutes(c.window.startTime);
         const windowEnd = timeToMinutes(c.window.endTime);
         let arrival = Math.max(currentTime + travel, windowStart);
+        arrival = roundUpToBlock(arrival);
         arrival = adjustForBreaks(arrival, c.client.visitDurationMinutes, worker);
 
         if (arrival + c.client.visitDurationMinutes <= windowEnd &&
