@@ -183,7 +183,7 @@ function ClientForm({ client, onSave, onCancel }: { client: Client; onSave: (c: 
         </div>
         <div>
           <Label htmlFor="address">Address</Label>
-          <AddressSearch id="address" value={form.address} onChange={address => setForm({ ...form, address })} />
+          <AddressSearch id="address" value={form.address} onChange={(address, coords) => setForm({ ...form, address, coords: coords ?? form.coords })} />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-4">
