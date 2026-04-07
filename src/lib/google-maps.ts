@@ -1,3 +1,4 @@
+/// <reference types="google.maps" />
 /** Utilities for Google Maps APIs (Places Autocomplete + Distance Matrix) */
 
 const API_KEY = 'AIzaSyCGQHsMGKk-IQ8hQaKV0lo9IEYoF7IBD40';
