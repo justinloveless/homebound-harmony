@@ -374,12 +374,20 @@ export default function Schedule() {
                 : 'Generate an optimized weekly schedule'}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {lastSchedule && (
-            <Button variant="outline" onClick={() => { setSaveName(`Schedule ${savedSchedules.length + 1}`); setShowSaveDialog(true); }}>
-              <Save className="w-4 h-4 mr-2" /> Save
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => { setSaveName(`Schedule ${savedSchedules.length + 1}`); setShowSaveDialog(true); }}>
+                <Save className="w-4 h-4 mr-2" /> Save
+              </Button>
+              <Button variant="outline" onClick={() => refineWithGoogle(lastSchedule)} disabled={refining}>
+                {refining ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</> : <><MapPin className="w-4 h-4 mr-2" /> Refine Travel</>}
+              </Button>
+            </>
           )}
+          <Button variant="outline" onClick={handleCreateBlank} disabled={!worker.name || !worker.homeAddress}>
+            <Plus className="w-4 h-4 mr-2" /> Blank Schedule
+          </Button>
           <Button onClick={handleGenerate} disabled={!canGenerate || refining}>
             {refining ? (
               <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</>
