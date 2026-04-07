@@ -21,12 +21,18 @@ function getMonday(): string {
 }
 
 export default function Schedule() {
-  const { workspace, setSchedule } = useWorkspace();
+  const { workspace, setSchedule, saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule } = useWorkspace();
   const { worker, clients, travelTimes, lastSchedule } = workspace;
+  const savedSchedules = workspace.savedSchedules ?? [];
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
   const [refining, setRefining] = useState(false);
   const [refineProgress, setRefineProgress] = useState('');
   const calendarScrollRef = useRef<HTMLDivElement>(null);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
