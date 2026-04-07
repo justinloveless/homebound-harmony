@@ -234,6 +234,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       workspace, loading, updateWorker, setClients, addClient, updateClient,
       removeClient, setTravelTimes, setTravelTimeErrors, setSchedule, replaceWorkspace,
       saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule,
+      fileAutoSaveEnabled, setFileAutoSaveEnabled,
     }}>
       {children}
     </WorkspaceContext.Provider>
