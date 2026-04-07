@@ -884,22 +884,22 @@ export default function Schedule() {
               );
             })()}
 
-            {/* New event popup */}
+            {/* Event popup (new / edit) */}
             {eventPopup && (
               <>
-                {/* Backdrop */}
                 <div className="fixed inset-0 z-40" onClick={() => setEventPopup(null)} />
-                {/* Popup */}
                 <div
                   className="fixed z-50 w-72 rounded-lg border bg-popover text-popover-foreground shadow-lg p-4 space-y-3"
                   style={{
                     left: Math.min(eventPopup.x, window.innerWidth - 300),
-                    top: Math.min(eventPopup.y, window.innerHeight - 350),
+                    top: Math.min(eventPopup.y, window.innerHeight - 400),
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold">New Visit — {DAY_LABELS[eventPopup.day]}</h4>
+                    <h4 className="text-sm font-semibold">
+                      {eventPopup.mode === 'edit' ? 'Edit Visit' : 'New Visit'} — {DAY_LABELS[eventPopup.day]}
+                    </h4>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEventPopup(null)}>
                       <X className="w-3 h-3" />
                     </Button>
@@ -924,6 +924,20 @@ export default function Schedule() {
                             <SelectItem key={c.id} value={c.id} className="text-xs">
                               {c.name} ({c.visitDurationMinutes}min)
                             </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs">Day</Label>
+                      <Select value={eventPopup.day} onValueChange={(d) => setEventPopup(prev => prev ? { ...prev, day: d as DayOfWeek } : null)}>
+                        <SelectTrigger className="h-8 text-xs mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).map(d => (
+                            <SelectItem key={d} value={d} className="text-xs">{DAY_LABELS[d]}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -967,8 +981,13 @@ export default function Schedule() {
 
                   <div className="flex gap-2 pt-1">
                     <Button size="sm" className="flex-1 h-7 text-xs" disabled={!eventPopup.clientId} onClick={handleConfirmEvent}>
-                      <Plus className="w-3 h-3 mr-1" /> Add Visit
+                      {eventPopup.mode === 'edit' ? <><Pencil className="w-3 h-3 mr-1" /> Save</> : <><Plus className="w-3 h-3 mr-1" /> Add Visit</>}
                     </Button>
+                    {eventPopup.mode === 'edit' && (
+                      <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={handleDeleteFromPopup}>
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEventPopup(null)}>
                       Cancel
                     </Button>
