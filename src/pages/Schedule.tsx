@@ -15,12 +15,16 @@ import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
 import { getTimeDependentTravelTimes } from '@/lib/google-maps';
 
-/** Popup state for adding a new event by clicking on the weekly calendar */
-interface NewEventPopup {
+/** Popup state for adding/editing an event on the weekly calendar */
+interface EventPopup {
+  mode: 'new' | 'edit';
   day: DayOfWeek;
   startTime: string; // "HH:MM"
   duration: number; // minutes
   clientId: string;
+  // For edit mode: original day & visit index
+  originalDay?: DayOfWeek;
+  originalIndex?: number;
   // Position for the popup
   x: number;
   y: number;
@@ -47,7 +51,7 @@ export default function Schedule() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  const [newEventPopup, setNewEventPopup] = useState<NewEventPopup | null>(null);
+  const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
 
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
@@ -378,11 +382,13 @@ export default function Schedule() {
 
   // Clients available for the popup day
   const availableForPopupDay = useMemo(() => {
-    if (!newEventPopup || !lastSchedule) return clients;
-    const daySchedule = lastSchedule.days.find(d => d.day === newEventPopup.day);
+    if (!eventPopup || !lastSchedule) return clients;
+    const daySchedule = lastSchedule.days.find(d => d.day === eventPopup.day);
     const onDay = new Set(daySchedule?.visits.map(v => v.clientId) ?? []);
-    return clients.filter(c => !onDay.has(c.id));
-  }, [newEventPopup?.day, lastSchedule, clients]);
+    // In edit mode, include the current client as available
+    const editingClientId = eventPopup.mode === 'edit' ? eventPopup.clientId : null;
+    return clients.filter(c => !onDay.has(c.id) || c.id === editingClientId);
+  }, [eventPopup?.day, eventPopup?.mode, eventPopup?.clientId, lastSchedule, clients]);
 
   /** Handle clicking on the weekly calendar to add a new event */
   const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, minHeight: number) => {
@@ -400,61 +406,128 @@ export default function Schedule() {
     const mins = clampedMinutes % 60;
     const startTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 
-    setNewEventPopup({
+    setEventPopup({
+      mode: 'new',
       day,
       startTime,
-      duration: 60, // default 1 hour
+      duration: 60,
       clientId: '',
       x: e.clientX,
       y: e.clientY,
     });
   };
 
-  /** Confirm adding the new event from the popup */
-  const handleConfirmNewEvent = () => {
-    if (!newEventPopup || !newEventPopup.clientId || !lastSchedule) return;
-    const client = clients.find(c => c.id === newEventPopup.clientId);
+  /** Open edit popup for an existing visit */
+  const handleEditVisit = (e: React.MouseEvent, day: DayOfWeek, visitIndex: number, visit: ScheduledVisit) => {
+    e.stopPropagation();
+    const client = clients.find(c => c.id === visit.clientId);
+    const startMin = visit.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+    const endMin = visit.endTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+    setEventPopup({
+      mode: 'edit',
+      day,
+      startTime: visit.startTime,
+      duration: endMin - startMin,
+      clientId: visit.clientId,
+      originalDay: day,
+      originalIndex: visitIndex,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  };
+
+  /** Confirm adding or editing an event from the popup */
+  const handleConfirmEvent = () => {
+    if (!eventPopup || !eventPopup.clientId || !lastSchedule) return;
+    const client = clients.find(c => c.id === eventPopup.clientId);
     if (!client) return;
 
-    const existingDay = lastSchedule.days.find(d => d.day === newEventPopup.day);
-    const existingVisits = existingDay ? [...existingDay.visits] : [];
-
-    // Parse start time
-    const [sh, sm] = newEventPopup.startTime.split(':').map(Number);
+    const [sh, sm] = eventPopup.startTime.split(':').map(Number);
     const startMin = sh * 60 + sm;
-    const endMin = startMin + newEventPopup.duration;
+    const endMin = startMin + eventPopup.duration;
     const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
-    // Insert the visit at the correct position based on start time
     const newVisit: ScheduledVisit = {
-      clientId: newEventPopup.clientId,
+      clientId: eventPopup.clientId,
       startTime: toTime(startMin),
       endTime: toTime(endMin),
       travelTimeFromPrev: 0,
     };
 
-    // Find insertion index (sorted by start time)
-    let insertIdx = existingVisits.length;
-    for (let i = 0; i < existingVisits.length; i++) {
-      const vStart = existingVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
-      if (startMin < vStart) {
-        insertIdx = i;
-        break;
+    // If editing, first remove the old visit from its original day
+    if (eventPopup.mode === 'edit' && eventPopup.originalDay != null && eventPopup.originalIndex != null) {
+      const origDaySchedule = lastSchedule.days.find(d => d.day === eventPopup.originalDay);
+      if (origDaySchedule) {
+        const remainingVisits = origDaySchedule.visits.filter((_, idx) => idx !== eventPopup.originalIndex);
+        if (eventPopup.originalDay === eventPopup.day) {
+          // Same day: remove old, insert new at correct position
+          let insertIdx = remainingVisits.length;
+          for (let i = 0; i < remainingVisits.length; i++) {
+            const vStart = remainingVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+            if (startMin < vStart) { insertIdx = i; break; }
+          }
+          remainingVisits.splice(insertIdx, 0, newVisit);
+          const date = origDaySchedule.date;
+          const recalced = recalcDaySchedule(remainingVisits, eventPopup.day, date, worker, clients, travelTimes);
+          updateDayInSchedule(recalced, eventPopup.day);
+          toast.success(`${client.name} updated on ${DAY_LABELS[eventPopup.day]}`);
+          setEventPopup(null);
+          return;
+        } else {
+          // Different day: remove from original day first
+          if (remainingVisits.length === 0) {
+            // Remove the day entirely — update inline
+            const newDays = lastSchedule.days.filter(d => d.day !== eventPopup.originalDay);
+            const totalTravel = newDays.reduce((s, d) => s + d.totalTravelMinutes, 0);
+            const totalAway = newDays.reduce((s, d) => {
+              const leave = d.leaveHomeTime.split(':').map(Number);
+              const arrive = d.arriveHomeTime.split(':').map(Number);
+              return s + ((arrive[0] * 60 + arrive[1]) - (leave[0] * 60 + leave[1]));
+            }, 0);
+            setSchedule({ ...lastSchedule, days: newDays, totalTravelMinutes: totalTravel, totalTimeAwayMinutes: totalAway });
+          } else {
+            const recalced = recalcDaySchedule(remainingVisits, eventPopup.originalDay, origDaySchedule.date, worker, clients, travelTimes);
+            updateDayInSchedule(recalced, eventPopup.originalDay);
+          }
+        }
       }
     }
-    existingVisits.splice(insertIdx, 0, newVisit);
 
-    const date = existingDay?.date ?? (() => {
-      const dayIndex = DAYS_OF_WEEK.indexOf(newEventPopup.day);
+    // Add to target day
+    // Re-read schedule state after potential removal above (use setTimeout to let state settle)
+    // For simplicity, we add directly to the current schedule
+    const targetDay = lastSchedule.days.find(d => d.day === eventPopup.day);
+    const targetVisits = targetDay ? [...targetDay.visits] : [];
+
+    // For edit mode moving to different day, the removal happened above but state hasn't updated yet.
+    // We work off the current visits and add.
+    let insertIdx = targetVisits.length;
+    for (let i = 0; i < targetVisits.length; i++) {
+      const vStart = targetVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
+      if (startMin < vStart) { insertIdx = i; break; }
+    }
+    targetVisits.splice(insertIdx, 0, newVisit);
+
+    const date = targetDay?.date ?? (() => {
+      const dayIndex = DAYS_OF_WEEK.indexOf(eventPopup.day);
       const dateObj = new Date(lastSchedule.weekStartDate);
       dateObj.setDate(dateObj.getDate() + dayIndex);
       return dateObj.toISOString().split('T')[0];
     })();
 
-    const recalced = recalcDaySchedule(existingVisits, newEventPopup.day, date, worker, clients, travelTimes);
-    updateDayInSchedule(recalced, newEventPopup.day);
-    toast.success(`${client.name} added to ${DAY_LABELS[newEventPopup.day]}`);
-    setNewEventPopup(null);
+    const recalced = recalcDaySchedule(targetVisits, eventPopup.day, date, worker, clients, travelTimes);
+    updateDayInSchedule(recalced, eventPopup.day);
+    toast.success(eventPopup.mode === 'edit' ? `${client.name} moved to ${DAY_LABELS[eventPopup.day]}` : `${client.name} added to ${DAY_LABELS[eventPopup.day]}`);
+    setEventPopup(null);
+  };
+
+  /** Delete visit from the edit popup */
+  const handleDeleteFromPopup = () => {
+    if (!eventPopup || eventPopup.mode !== 'edit' || !lastSchedule || eventPopup.originalDay == null || eventPopup.originalIndex == null) return;
+    const daySchedule = lastSchedule.days.find(d => d.day === eventPopup.originalDay);
+    if (!daySchedule) return;
+    removeVisit(daySchedule, eventPopup.originalIndex);
+    setEventPopup(null);
   };
 
   return (
@@ -769,7 +842,7 @@ export default function Schedule() {
                                   data-event-block
                                   className="absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden cursor-pointer hover:brightness-110 transition-all"
                                   style={{ top: startMin * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
-                                  onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
+                                  onClick={(e) => handleEditVisit(e, day, i, v)}
                                   title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)}`}
                                 >
                                   <div className="px-1 py-0.5">
@@ -811,23 +884,23 @@ export default function Schedule() {
               );
             })()}
 
-            {/* New event popup */}
-            {newEventPopup && (
+            {/* Event popup (new / edit) */}
+            {eventPopup && (
               <>
-                {/* Backdrop */}
-                <div className="fixed inset-0 z-40" onClick={() => setNewEventPopup(null)} />
-                {/* Popup */}
+                <div className="fixed inset-0 z-40" onClick={() => setEventPopup(null)} />
                 <div
                   className="fixed z-50 w-72 rounded-lg border bg-popover text-popover-foreground shadow-lg p-4 space-y-3"
                   style={{
-                    left: Math.min(newEventPopup.x, window.innerWidth - 300),
-                    top: Math.min(newEventPopup.y, window.innerHeight - 350),
+                    left: Math.min(eventPopup.x, window.innerWidth - 300),
+                    top: Math.min(eventPopup.y, window.innerHeight - 400),
                   }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold">New Visit — {DAY_LABELS[newEventPopup.day]}</h4>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setNewEventPopup(null)}>
+                    <h4 className="text-sm font-semibold">
+                      {eventPopup.mode === 'edit' ? 'Edit Visit' : 'New Visit'} — {DAY_LABELS[eventPopup.day]}
+                    </h4>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setEventPopup(null)}>
                       <X className="w-3 h-3" />
                     </Button>
                   </div>
@@ -835,9 +908,9 @@ export default function Schedule() {
                   <div className="space-y-2">
                     <div>
                       <Label className="text-xs">Client</Label>
-                      <Select value={newEventPopup.clientId} onValueChange={(id) => {
+                      <Select value={eventPopup.clientId} onValueChange={(id) => {
                         const client = clients.find(c => c.id === id);
-                        setNewEventPopup(prev => prev ? {
+                        setEventPopup(prev => prev ? {
                           ...prev,
                           clientId: id,
                           duration: client?.visitDurationMinutes ?? prev.duration,
@@ -856,15 +929,29 @@ export default function Schedule() {
                       </Select>
                     </div>
 
+                    <div>
+                      <Label className="text-xs">Day</Label>
+                      <Select value={eventPopup.day} onValueChange={(d) => setEventPopup(prev => prev ? { ...prev, day: d as DayOfWeek } : null)}>
+                        <SelectTrigger className="h-8 text-xs mt-1">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).map(d => (
+                            <SelectItem key={d} value={d} className="text-xs">{DAY_LABELS[d]}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <Label className="text-xs">Start Time</Label>
                         <Input
                           type="time"
                           className="h-8 text-xs mt-1"
-                          value={newEventPopup.startTime}
+                          value={eventPopup.startTime}
                           step={900}
-                          onChange={(e) => setNewEventPopup(prev => prev ? { ...prev, startTime: e.target.value } : null)}
+                          onChange={(e) => setEventPopup(prev => prev ? { ...prev, startTime: e.target.value } : null)}
                         />
                       </div>
                       <div>
@@ -872,31 +959,36 @@ export default function Schedule() {
                         <Input
                           type="number"
                           className="h-8 text-xs mt-1"
-                          value={newEventPopup.duration}
+                          value={eventPopup.duration}
                           min={15}
                           step={15}
-                          onChange={(e) => setNewEventPopup(prev => prev ? { ...prev, duration: parseInt(e.target.value) || 15 } : null)}
+                          onChange={(e) => setEventPopup(prev => prev ? { ...prev, duration: parseInt(e.target.value) || 15 } : null)}
                         />
                       </div>
                     </div>
 
-                    {newEventPopup.clientId && (() => {
-                      const [sh, sm] = newEventPopup.startTime.split(':').map(Number);
-                      const endMin = sh * 60 + sm + newEventPopup.duration;
+                    {eventPopup.clientId && (() => {
+                      const [sh, sm] = eventPopup.startTime.split(':').map(Number);
+                      const endMin = sh * 60 + sm + eventPopup.duration;
                       const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
                       return (
                         <p className="text-[10px] text-muted-foreground">
-                          {formatTime(newEventPopup.startTime)} – {formatTime(endTime)}
+                          {formatTime(eventPopup.startTime)} – {formatTime(endTime)}
                         </p>
                       );
                     })()}
                   </div>
 
                   <div className="flex gap-2 pt-1">
-                    <Button size="sm" className="flex-1 h-7 text-xs" disabled={!newEventPopup.clientId} onClick={handleConfirmNewEvent}>
-                      <Plus className="w-3 h-3 mr-1" /> Add Visit
+                    <Button size="sm" className="flex-1 h-7 text-xs" disabled={!eventPopup.clientId} onClick={handleConfirmEvent}>
+                      {eventPopup.mode === 'edit' ? <><Pencil className="w-3 h-3 mr-1" /> Save</> : <><Plus className="w-3 h-3 mr-1" /> Add Visit</>}
                     </Button>
-                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setNewEventPopup(null)}>
+                    {eventPopup.mode === 'edit' && (
+                      <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={handleDeleteFromPopup}>
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    )}
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setEventPopup(null)}>
                       Cancel
                     </Button>
                   </div>
