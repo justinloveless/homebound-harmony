@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
 import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, DAYS_OF_WEEK, DAY_LABELS } from '@/types/models';
+import { AddressSearch } from '@/components/AddressSearch';
 import { toast } from 'sonner';
 
 const emptyClient = (): Client => ({
@@ -182,7 +183,7 @@ function ClientForm({ client, onSave, onCancel }: { client: Client; onSave: (c: 
         </div>
         <div>
           <Label htmlFor="address">Address</Label>
-          <Input id="address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} placeholder="123 Main St, City" />
+          <AddressSearch id="address" value={form.address} onChange={address => setForm({ ...form, address })} />
         </div>
       </div>
       <div className="grid grid-cols-3 gap-4">

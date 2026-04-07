@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Download, Upload, Trash2, Plus } from 'lucide-react';
 import { DAYS_OF_WEEK, DAY_LABELS, type DayOfWeek, type WorkerProfile } from '@/types/models';
+import { AddressSearch } from '@/components/AddressSearch';
 import { exportWorkspace, importWorkspace, downloadJson } from '@/lib/storage';
 import { toast } from 'sonner';
 
@@ -90,7 +91,7 @@ export default function SettingsPage() {
             </div>
             <div>
               <Label htmlFor="waddr">Home Address</Label>
-              <Input id="waddr" value={form.homeAddress} onChange={e => setForm({ ...form, homeAddress: e.target.value })} placeholder="456 Oak St, City" />
+              <AddressSearch id="waddr" value={form.homeAddress} onChange={homeAddress => setForm({ ...form, homeAddress })} />
             </div>
           </div>
 
