@@ -36,7 +36,11 @@ export interface Client {
 export interface WorkerProfile {
   name: string;
   homeAddress: string;
+  homeCoords?: Coords;
   workingHours: { startTime: string; endTime: string };
+  daysOff: DayOfWeek[];
+  breaks: { startTime: string; endTime: string; label: string }[];
+}
   daysOff: DayOfWeek[];
   breaks: { startTime: string; endTime: string; label: string }[];
 }
