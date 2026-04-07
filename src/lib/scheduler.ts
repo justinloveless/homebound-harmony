@@ -1,6 +1,7 @@
 import {
   type Client, type WorkerProfile, type TravelTimeMatrix, type DayOfWeek,
   type DaySchedule, type WeekSchedule, type ScheduledVisit, type TimeWindow,
+  type SchedulingStrategy,
   DAYS_OF_WEEK, travelKey, DEFAULT_TRAVEL_TIME, frequencyToVisits,
 } from '@/types/models';
 
