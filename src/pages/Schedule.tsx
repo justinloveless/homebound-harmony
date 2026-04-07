@@ -103,6 +103,7 @@ export default function Schedule() {
             startTime: toTime(arrival),
             endTime: toTime(endMin),
             travelTimeFromPrev: travelMin,
+            travelDistanceMiFromPrev: distanceMiles[i] ?? undefined,
           });
 
           currentTime = endMin;
