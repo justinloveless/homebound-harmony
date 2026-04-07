@@ -2,6 +2,24 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { loadWorkspace, saveWorkspace } from '@/lib/storage';
 import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type WeekSchedule, DEFAULT_WORKSPACE, travelKey, estimateTravelMinutes, type Coords } from '@/types/models';
 
+/** Recalculate travel times for all location pairs that have coordinates */
+function recalcTravelTimes(ws: Workspace): TravelTimeMatrix {
+  const matrix = { ...ws.travelTimes };
+  const locations: { id: string; coords?: Coords }[] = [
+    { id: 'home', coords: ws.worker.homeCoords },
+    ...ws.clients.map(c => ({ id: c.id, coords: c.coords })),
+  ];
+  for (let i = 0; i < locations.length; i++) {
+    for (let j = i + 1; j < locations.length; j++) {
+      const a = locations[i], b = locations[j];
+      if (a.coords && b.coords) {
+        matrix[travelKey(a.id, b.id)] = estimateTravelMinutes(a.coords, b.coords);
+      }
+    }
+  }
+  return matrix;
+}
+
 interface WorkspaceContextValue {
   workspace: Workspace;
   loading: boolean;
