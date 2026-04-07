@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { generateWeekSchedule, recalcDaySchedule } from '@/lib/scheduler';
 import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek, type WeekSchedule, type DaySchedule, type ScheduledVisit, type SavedSchedule } from '@/types/models';
 import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus, Loader2, Save, FolderOpen, X, Eye, Pencil } from 'lucide-react';
@@ -12,6 +14,17 @@ import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
 import { getTimeDependentTravelTimes } from '@/lib/google-maps';
+
+/** Popup state for adding a new event by clicking on the weekly calendar */
+interface NewEventPopup {
+  day: DayOfWeek;
+  startTime: string; // "HH:MM"
+  duration: number; // minutes
+  clientId: string;
+  // Position for the popup
+  x: number;
+  y: number;
+}
 
 function getMonday(): string {
   const d = new Date();
