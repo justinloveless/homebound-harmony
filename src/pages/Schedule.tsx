@@ -904,6 +904,7 @@ export default function Schedule() {
               </>
             )}
 
+            <Card>
               <CardContent className="pt-5">
                 <div className="flex flex-wrap gap-6 text-sm">
                   <div>
