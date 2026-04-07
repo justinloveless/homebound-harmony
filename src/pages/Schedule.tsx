@@ -348,14 +348,171 @@ export default function Schedule() {
                 : 'Generate an optimized weekly schedule'}
           </p>
         </div>
-        <Button onClick={handleGenerate} disabled={!canGenerate || refining}>
-          {refining ? (
-            <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</>
-          ) : (
-            <><RotateCw className="w-4 h-4 mr-2" /> {lastSchedule ? 'Regenerate' : 'Generate Schedule'}</>
+        <div className="flex gap-2">
+          {lastSchedule && (
+            <Button variant="outline" onClick={() => { setSaveName(`Schedule ${savedSchedules.length + 1}`); setShowSaveDialog(true); }}>
+              <Save className="w-4 h-4 mr-2" /> Save
+            </Button>
           )}
-        </Button>
+          <Button onClick={handleGenerate} disabled={!canGenerate || refining}>
+            {refining ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</>
+            ) : (
+              <><RotateCw className="w-4 h-4 mr-2" /> {lastSchedule ? 'Regenerate' : 'Generate Schedule'}</>
+            )}
+          </Button>
+        </div>
       </div>
+
+      {/* Save dialog */}
+      {showSaveDialog && (
+        <Card>
+          <CardContent className="py-3 flex items-center gap-3">
+            <input
+              className="flex-1 h-8 rounded border border-input bg-background px-3 text-sm"
+              value={saveName}
+              onChange={e => setSaveName(e.target.value)}
+              placeholder="Schedule name..."
+              autoFocus
+              onKeyDown={e => {
+                if (e.key === 'Enter' && saveName.trim()) {
+                  saveSchedule(saveName.trim());
+                  setShowSaveDialog(false);
+                  toast.success(`Schedule saved as "${saveName.trim()}"`);
+                }
+              }}
+            />
+            <Button size="sm" onClick={() => {
+              if (saveName.trim()) {
+                saveSchedule(saveName.trim());
+                setShowSaveDialog(false);
+                toast.success(`Schedule saved as "${saveName.trim()}"`);
+              }
+            }}>Save</Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowSaveDialog(false)}>
+              <X className="w-4 h-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Saved schedules */}
+      {savedSchedules.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <FolderOpen className="w-4 h-4" /> Saved Schedules ({savedSchedules.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1.5">
+              {savedSchedules.map(s => (
+                <div key={s.id} className="flex items-center gap-2 text-sm">
+                  {renamingId === s.id ? (
+                    <input
+                      className="flex-1 h-7 rounded border border-input bg-background px-2 text-xs"
+                      value={renameValue}
+                      onChange={e => setRenameValue(e.target.value)}
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { renameSavedSchedule(s.id, renameValue); setRenamingId(null); }
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                      onBlur={() => { renameSavedSchedule(s.id, renameValue); setRenamingId(null); }}
+                    />
+                  ) : (
+                    <span className="flex-1 truncate">{s.name}</span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground shrink-0">
+                    {s.schedule.totalTravelMinutes}m travel · {s.schedule.days.reduce((n, d) => n + d.visits.length, 0)} visits
+                  </span>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" title="Rename"
+                    onClick={() => { setRenamingId(s.id); setRenameValue(s.name); }}>
+                    <Pencil className="w-3 h-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" title="Compare side-by-side"
+                    onClick={() => setCompareId(compareId === s.id ? null : s.id)}>
+                    <Eye className="w-3 h-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" title="Load this schedule"
+                    onClick={() => { loadSavedSchedule(s.id); toast.success(`Loaded "${s.name}"`); }}>
+                    <FolderOpen className="w-3 h-3" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" title="Delete"
+                    onClick={() => { deleteSavedSchedule(s.id); if (compareId === s.id) setCompareId(null); toast.success('Deleted'); }}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Comparison view */}
+      {compareId && lastSchedule && (() => {
+        const compareSchedule = savedSchedules.find(s => s.id === compareId);
+        if (!compareSchedule) return null;
+        const current = lastSchedule;
+        const saved = compareSchedule.schedule;
+        return (
+          <Card className="border-primary/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center justify-between">
+                <span>Comparing: Current vs "{compareSchedule.name}"</span>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setCompareId(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="font-semibold mb-2">Current Schedule</p>
+                  <div className="space-y-1 text-xs">
+                    <p>Travel: <span className="font-bold">{current.totalTravelMinutes} min</span></p>
+                    <p>Time away: <span className="font-bold">{Math.floor(current.totalTimeAwayMinutes / 60)}h {current.totalTimeAwayMinutes % 60}m</span></p>
+                    <p>Days: <span className="font-bold">{current.days.length}</span></p>
+                    <p>Visits: <span className="font-bold">{current.days.reduce((n, d) => n + d.visits.length, 0)}</span></p>
+                    {current.days.map(d => (
+                      <p key={d.day} className="text-muted-foreground">{DAY_LABELS[d.day]}: {d.visits.length} visits, {d.totalTravelMinutes}m</p>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="font-semibold mb-2">{compareSchedule.name}</p>
+                  <div className="space-y-1 text-xs">
+                    <p>Travel: <span className="font-bold">{saved.totalTravelMinutes} min</span></p>
+                    <p>Time away: <span className="font-bold">{Math.floor(saved.totalTimeAwayMinutes / 60)}h {saved.totalTimeAwayMinutes % 60}m</span></p>
+                    <p>Days: <span className="font-bold">{saved.days.length}</span></p>
+                    <p>Visits: <span className="font-bold">{saved.days.reduce((n, d) => n + d.visits.length, 0)}</span></p>
+                    {saved.days.map(d => (
+                      <p key={d.day} className="text-muted-foreground">{DAY_LABELS[d.day]}: {d.visits.length} visits, {d.totalTravelMinutes}m</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {/* Diff summary */}
+              <div className="mt-3 pt-3 border-t text-xs">
+                {(() => {
+                  const travelDiff = current.totalTravelMinutes - saved.totalTravelMinutes;
+                  const awayDiff = current.totalTimeAwayMinutes - saved.totalTimeAwayMinutes;
+                  return (
+                    <div className="flex gap-4">
+                      <span className={travelDiff < 0 ? 'text-green-600' : travelDiff > 0 ? 'text-destructive' : 'text-muted-foreground'}>
+                        Travel: {travelDiff > 0 ? '+' : ''}{travelDiff} min
+                      </span>
+                      <span className={awayDiff < 0 ? 'text-green-600' : awayDiff > 0 ? 'text-destructive' : 'text-muted-foreground'}>
+                        Time away: {awayDiff > 0 ? '+' : ''}{awayDiff} min
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {!canGenerate && (
         <Card className="border-dashed">
