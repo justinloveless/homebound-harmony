@@ -811,7 +811,99 @@ export default function Schedule() {
               );
             })()}
 
-            <Card>
+            {/* New event popup */}
+            {newEventPopup && (
+              <>
+                {/* Backdrop */}
+                <div className="fixed inset-0 z-40" onClick={() => setNewEventPopup(null)} />
+                {/* Popup */}
+                <div
+                  className="fixed z-50 w-72 rounded-lg border bg-popover text-popover-foreground shadow-lg p-4 space-y-3"
+                  style={{
+                    left: Math.min(newEventPopup.x, window.innerWidth - 300),
+                    top: Math.min(newEventPopup.y, window.innerHeight - 350),
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold">New Visit — {DAY_LABELS[newEventPopup.day]}</h4>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setNewEventPopup(null)}>
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div>
+                      <Label className="text-xs">Client</Label>
+                      <Select value={newEventPopup.clientId} onValueChange={(id) => {
+                        const client = clients.find(c => c.id === id);
+                        setNewEventPopup(prev => prev ? {
+                          ...prev,
+                          clientId: id,
+                          duration: client?.visitDurationMinutes ?? prev.duration,
+                        } : null);
+                      }}>
+                        <SelectTrigger className="h-8 text-xs mt-1">
+                          <SelectValue placeholder="Select a client..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableForPopupDay.map(c => (
+                            <SelectItem key={c.id} value={c.id} className="text-xs">
+                              {c.name} ({c.visitDurationMinutes}min)
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Start Time</Label>
+                        <Input
+                          type="time"
+                          className="h-8 text-xs mt-1"
+                          value={newEventPopup.startTime}
+                          step={900}
+                          onChange={(e) => setNewEventPopup(prev => prev ? { ...prev, startTime: e.target.value } : null)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Duration (min)</Label>
+                        <Input
+                          type="number"
+                          className="h-8 text-xs mt-1"
+                          value={newEventPopup.duration}
+                          min={15}
+                          step={15}
+                          onChange={(e) => setNewEventPopup(prev => prev ? { ...prev, duration: parseInt(e.target.value) || 15 } : null)}
+                        />
+                      </div>
+                    </div>
+
+                    {newEventPopup.clientId && (() => {
+                      const [sh, sm] = newEventPopup.startTime.split(':').map(Number);
+                      const endMin = sh * 60 + sm + newEventPopup.duration;
+                      const endTime = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+                      return (
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatTime(newEventPopup.startTime)} – {formatTime(endTime)}
+                        </p>
+                      );
+                    })()}
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <Button size="sm" className="flex-1 h-7 text-xs" disabled={!newEventPopup.clientId} onClick={handleConfirmNewEvent}>
+                      <Plus className="w-3 h-3 mr-1" /> Add Visit
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setNewEventPopup(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+
               <CardContent className="pt-5">
                 <div className="flex flex-wrap gap-6 text-sm">
                   <div>
