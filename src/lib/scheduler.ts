@@ -125,14 +125,29 @@ export function generateWeekSchedule(
       if (needed === 0) continue;
 
       if (needed >= 2) {
-        // Multi-visit clients go on both groups (alternating days)
-        const allowedIndices = new Set<number>();
-        workingDays.forEach((_, i) => allowedIndices.add(i));
-        clientDayGroup.set(client.id, allowedIndices);
-        // Count visits against both groups proportionally
-        const perGroup = Math.ceil(needed / 2);
-        groupACount += perGroup;
-        groupBCount += needed - perGroup;
+        // Multi-visit clients stay in ONE group — the group with enough days and less load.
+        // Group A (Mon/Wed/Fri) has more days so can handle more visits.
+        const hasAvailA = groupADays.filter(d => getClientWindowForDay(client, d) !== null).length;
+        const hasAvailB = groupBDays.filter(d => getClientWindowForDay(client, d) !== null).length;
+
+        let assignToA: boolean;
+        if (hasAvailA >= needed && hasAvailB >= needed) {
+          assignToA = groupACount <= groupBCount;
+        } else {
+          assignToA = hasAvailA >= hasAvailB;
+        }
+
+        if (assignToA) {
+          const indices = new Set<number>();
+          workingDays.forEach((_, i) => { if (i % 2 === 0) indices.add(i); });
+          clientDayGroup.set(client.id, indices);
+          groupACount += needed;
+        } else {
+          const indices = new Set<number>();
+          workingDays.forEach((_, i) => { if (i % 2 === 1) indices.add(i); });
+          clientDayGroup.set(client.id, indices);
+          groupBCount += needed;
+        }
       } else {
         // Single-visit clients: assign to the less-loaded group
         // But only if the client has availability on that group's days
