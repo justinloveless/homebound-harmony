@@ -51,7 +51,7 @@ export default function Schedule() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
 
-  const [newEventPopup, setNewEventPopup] = useState<NewEventPopup | null>(null);
+  const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
 
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
