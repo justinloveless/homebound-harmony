@@ -103,15 +103,67 @@ export function generateWeekSchedule(
   const workingDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
   const strategy: SchedulingStrategy = worker.schedulingStrategy ?? 'spread';
 
-  // Assign each client a "preferred day set" based on strategy
-  // For 'alternate': even-index clients prefer day indices 0,2,4; odd-index prefer 1,3
-  // For 'spread': distribute clients round-robin across days
-  // For 'pack': no preference, just greedily fill days in order (original behavior)
-
   // Track which days each client has been scheduled on (for multi-visit clients)
   const clientScheduledDays = new Map<string, Set<DayOfWeek>>();
 
+  // For 'alternate' strategy, pre-assign each client to a day-group.
+  // Group A = odd-indexed working days (0, 2, 4 → e.g. Mon, Wed, Fri)
+  // Group B = even-indexed working days (1, 3 → e.g. Tue, Thu)
+  // Clients needing multiple visits per week get assigned to BOTH groups.
+  const clientDayGroup = new Map<string, Set<number>>(); // client id → set of allowed day indices
+  if (strategy === 'alternate') {
+    // Sort clients by priority so high-priority ones get assigned first
+    const sortedClients = [...clients].sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+    // Count how many client-slots each group has capacity for
+    let groupACount = 0;
+    let groupBCount = 0;
+    const groupADays = workingDays.filter((_, i) => i % 2 === 0); // Mon, Wed, Fri
+    const groupBDays = workingDays.filter((_, i) => i % 2 === 1); // Tue, Thu
+
+    for (const client of sortedClients) {
+      const needed = visitsNeeded.get(client.id) ?? 0;
+      if (needed === 0) continue;
+
+      if (needed >= 2) {
+        // Multi-visit clients go on both groups (alternating days)
+        const allowedIndices = new Set<number>();
+        workingDays.forEach((_, i) => allowedIndices.add(i));
+        clientDayGroup.set(client.id, allowedIndices);
+        // Count visits against both groups proportionally
+        const perGroup = Math.ceil(needed / 2);
+        groupACount += perGroup;
+        groupBCount += needed - perGroup;
+      } else {
+        // Single-visit clients: assign to the less-loaded group
+        // But only if the client has availability on that group's days
+        const hasAvailA = groupADays.some(d => getClientWindowForDay(client, d) !== null);
+        const hasAvailB = groupBDays.some(d => getClientWindowForDay(client, d) !== null);
+
+        let assignToA: boolean;
+        if (hasAvailA && hasAvailB) {
+          assignToA = groupACount <= groupBCount;
+        } else {
+          assignToA = hasAvailA;
+        }
+
+        if (assignToA) {
+          const indices = new Set<number>();
+          workingDays.forEach((_, i) => { if (i % 2 === 0) indices.add(i); });
+          clientDayGroup.set(client.id, indices);
+          groupACount++;
+        } else {
+          const indices = new Set<number>();
+          workingDays.forEach((_, i) => { if (i % 2 === 1) indices.add(i); });
+          clientDayGroup.set(client.id, indices);
+          groupBCount++;
+        }
+      }
+    }
+  }
+
   for (const day of workingDays) {
+    const dayIdx = workingDays.indexOf(day);
+
     // Gather candidates: clients that still need more visits this week and are available today
     const candidates: CandidateVisit[] = [];
     for (const client of clients) {
@@ -119,40 +171,39 @@ export function generateWeekSchedule(
       const scheduled = visitCounts.get(client.id) ?? 0;
       if (scheduled >= needed) continue;
 
+      // For 'alternate' strategy, only allow clients assigned to this day's group
+      if (strategy === 'alternate') {
+        const allowedDays = clientDayGroup.get(client.id);
+        if (allowedDays && !allowedDays.has(dayIdx)) continue;
+      }
+
       const window = getClientWindowForDay(client, day);
       if (window) {
         candidates.push({ client, window });
       }
     }
 
-    // Sort by priority first
+    // Sort by priority, then by strategy-specific heuristics
     candidates.sort((a, b) => {
       const pDiff = priorityOrder[a.client.priority] - priorityOrder[b.client.priority];
       if (pDiff !== 0) return pDiff;
 
-      // Apply strategy-based day preference scoring
-      const dayIdx = workingDays.indexOf(day);
-
-      if (strategy === 'alternate') {
-        // Prefer clients whose index parity matches the day parity (Mon/Wed/Fri vs Tue/Thu)
-        const aClientIdx = clients.indexOf(a.client);
-        const bClientIdx = clients.indexOf(b.client);
-        const aMatch = (aClientIdx % 2 === dayIdx % 2) ? 0 : 1;
-        const bMatch = (bClientIdx % 2 === dayIdx % 2) ? 0 : 1;
-        if (aMatch !== bMatch) return aMatch - bMatch;
-      } else if (strategy === 'spread') {
+      if (strategy === 'spread') {
         // Prefer clients who have been scheduled on fewer days so far
         const aScheduledDays = clientScheduledDays.get(a.client.id)?.size ?? 0;
         const bScheduledDays = clientScheduledDays.get(b.client.id)?.size ?? 0;
-        // Prefer less-scheduled clients
         if (aScheduledDays !== bScheduledDays) return aScheduledDays - bScheduledDays;
-        // Among equally scheduled, prefer clients whose "home day" matches
         // Distribute by assigning each client a preferred day slot
         const aPreferred = clients.indexOf(a.client) % workingDays.length;
         const bPreferred = clients.indexOf(b.client) % workingDays.length;
         const aDist = Math.abs(dayIdx - aPreferred);
         const bDist = Math.abs(dayIdx - bPreferred);
         if (aDist !== bDist) return aDist - bDist;
+      } else if (strategy === 'alternate') {
+        // For multi-visit clients, prefer days they haven't been on yet
+        const aScheduledDays = clientScheduledDays.get(a.client.id)?.size ?? 0;
+        const bScheduledDays = clientScheduledDays.get(b.client.id)?.size ?? 0;
+        if (aScheduledDays !== bScheduledDays) return aScheduledDays - bScheduledDays;
       }
 
       const aRemaining = (visitsNeeded.get(a.client.id) ?? 0) - (visitCounts.get(a.client.id) ?? 0);
