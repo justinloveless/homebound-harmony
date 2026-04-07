@@ -61,7 +61,7 @@ export default function Schedule() {
         // Build departure time from schedule date + leave time
         const departureDate = new Date(`${day.date}T${day.leaveHomeTime}:00`);
 
-        const { durationInTraffic } = await getTimeDependentTravelTimes(
+        const { durationInTraffic, distanceMiles } = await getTimeDependentTravelTimes(
           addresses,
           departureDate,
           (msg) => setRefineProgress(`${DAY_LABELS[day.day]}: ${msg}`),
