@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { generateWeekSchedule, recalcDaySchedule } from '@/lib/scheduler';
 import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek, type WeekSchedule, type DaySchedule, type ScheduledVisit, type SavedSchedule } from '@/types/models';
-import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus, Loader2, Save, FolderOpen, X, Eye, Pencil } from 'lucide-react';
+import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus, Loader2, Save, FolderOpen, X, Eye, Pencil, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
@@ -50,9 +50,8 @@ export default function Schedule() {
   const [compareId, setCompareId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-
   const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
-
+  const [copyMenuDay, setCopyMenuDay] = useState<DayOfWeek | null>(null);
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
     const scheduledIds = new Set(
@@ -373,6 +372,31 @@ export default function Schedule() {
     const recalced = recalcDaySchedule(existingVisits, day, date, worker, clients, travelTimes);
     updateDayInSchedule(recalced, day);
     toast.success(`${client.name} added to ${DAY_LABELS[day]}`);
+  };
+
+  /** Copy all visits from one day to another */
+  const copyDayTo = (fromDay: DayOfWeek, toDay: DayOfWeek) => {
+    if (!lastSchedule) return;
+    const fromSchedule = lastSchedule.days.find(d => d.day === fromDay);
+    if (!fromSchedule || fromSchedule.visits.length === 0) {
+      toast.error(`No visits on ${DAY_LABELS[fromDay]} to copy`);
+      return;
+    }
+
+    const toDayDate = (() => {
+      const existing = lastSchedule.days.find(d => d.day === toDay);
+      if (existing) return existing.date;
+      const dayIndex = DAYS_OF_WEEK.indexOf(toDay);
+      const dateObj = new Date(lastSchedule.weekStartDate);
+      dateObj.setDate(dateObj.getDate() + dayIndex);
+      return dateObj.toISOString().split('T')[0];
+    })();
+
+    const copiedVisits: ScheduledVisit[] = fromSchedule.visits.map(v => ({ ...v }));
+    const recalced = recalcDaySchedule(copiedVisits, toDay, toDayDate, worker, clients, travelTimes);
+    updateDayInSchedule(recalced, toDay);
+    setCopyMenuDay(null);
+    toast.success(`Copied ${DAY_LABELS[fromDay]} → ${DAY_LABELS[toDay]}`);
   };
 
   // Clients not on the currently selected day
@@ -779,7 +803,37 @@ export default function Schedule() {
                         >
                           {/* Day header (sticky) */}
                           <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
-                            {DAY_LABELS[day]}
+                            <div className="flex items-center justify-center gap-1">
+                              <span>{DAY_LABELS[day]}</span>
+                              {daySchedule && daySchedule.visits.length > 0 && (
+                                <div className="relative">
+                                  <button
+                                    className="p-0.5 rounded hover:bg-muted transition-colors"
+                                    title={`Copy ${DAY_LABELS[day]} to another day`}
+                                    onClick={(e) => { e.stopPropagation(); setCopyMenuDay(copyMenuDay === day ? null : day); }}
+                                  >
+                                    <Copy className="w-3 h-3 text-muted-foreground" />
+                                  </button>
+                                  {copyMenuDay === day && (
+                                    <>
+                                      <div className="fixed inset-0 z-20" onClick={() => setCopyMenuDay(null)} />
+                                      <div className="absolute top-full left-1/2 -translate-x-1/2 z-30 mt-1 bg-popover border rounded-md shadow-md py-1 min-w-[100px]">
+                                        <p className="text-[9px] text-muted-foreground px-2 pb-1">Copy to:</p>
+                                        {DAYS_OF_WEEK.filter(d => d !== day && !worker.daysOff.includes(d)).map(d => (
+                                          <button
+                                            key={d}
+                                            className="w-full text-left px-3 py-1 text-[11px] hover:bg-muted transition-colors"
+                                            onClick={(e) => { e.stopPropagation(); copyDayTo(day, d); }}
+                                          >
+                                            {DAY_LABELS[d]}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                             {daySchedule && (
                               <div className="text-[9px] font-normal text-muted-foreground leading-tight">
                                 {daySchedule.visits.length} visits · {daySchedule.totalTravelMinutes}m
