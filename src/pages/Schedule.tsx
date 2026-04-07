@@ -179,6 +179,32 @@ export default function Schedule() {
     await refineWithGoogle(schedule);
   };
 
+  const handleCreateBlank = () => {
+    const weekStart = getMonday();
+    const workDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+    const days: DaySchedule[] = workDays.map((day, i) => {
+      const dateObj = new Date(weekStart);
+      dateObj.setDate(dateObj.getDate() + DAYS_OF_WEEK.indexOf(day));
+      return {
+        day,
+        date: dateObj.toISOString().split('T')[0],
+        visits: [],
+        totalTravelMinutes: 0,
+        leaveHomeTime: worker.workingHours.startTime,
+        arriveHomeTime: worker.workingHours.startTime,
+      };
+    });
+    const blank: WeekSchedule = {
+      weekStartDate: weekStart,
+      days,
+      totalTravelMinutes: 0,
+      totalTimeAwayMinutes: 0,
+    };
+    setSchedule(blank);
+    setSelectedDay(workDays[0] ?? null);
+    toast.success('Blank schedule created — add clients to each day in the Daily View');
+  };
+
   const selectedDaySchedule = lastSchedule?.days.find(d => d.day === selectedDay);
 
   // --- Manual editing helpers ---
@@ -348,12 +374,20 @@ export default function Schedule() {
                 : 'Generate an optimized weekly schedule'}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {lastSchedule && (
-            <Button variant="outline" onClick={() => { setSaveName(`Schedule ${savedSchedules.length + 1}`); setShowSaveDialog(true); }}>
-              <Save className="w-4 h-4 mr-2" /> Save
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => { setSaveName(`Schedule ${savedSchedules.length + 1}`); setShowSaveDialog(true); }}>
+                <Save className="w-4 h-4 mr-2" /> Save
+              </Button>
+              <Button variant="outline" onClick={() => refineWithGoogle(lastSchedule)} disabled={refining}>
+                {refining ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</> : <><MapPin className="w-4 h-4 mr-2" /> Refine Travel</>}
+              </Button>
+            </>
           )}
+          <Button variant="outline" onClick={handleCreateBlank} disabled={!worker.name || !worker.homeAddress}>
+            <Plus className="w-4 h-4 mr-2" /> Blank Schedule
+          </Button>
           <Button onClick={handleGenerate} disabled={!canGenerate || refining}>
             {refining ? (
               <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Refining...</>
@@ -784,12 +818,16 @@ export default function Schedule() {
 
           <TabsContent value="daily" className="space-y-4 mt-4">
             <div className="flex gap-2 flex-wrap">
-              {lastSchedule.days.map(day => (
-                <Button key={day.day} variant={selectedDay === day.day ? 'default' : 'outline'} size="sm"
-                  onClick={() => setSelectedDay(day.day)}>
-                  {DAY_LABELS[day.day]}
-                </Button>
-              ))}
+              {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).map(day => {
+                const dayData = lastSchedule.days.find(d => d.day === day);
+                const visitCount = dayData?.visits.length ?? 0;
+                return (
+                  <Button key={day} variant={selectedDay === day ? 'default' : 'outline'} size="sm"
+                    onClick={() => setSelectedDay(day)}>
+                    {DAY_LABELS[day]} {visitCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{visitCount}</Badge>}
+                  </Button>
+                );
+              })}
             </div>
 
             {selectedDaySchedule ? (
@@ -897,6 +935,28 @@ export default function Schedule() {
                   clients={clients}
                 />
               </div>
+            ) : selectedDay ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <MapPin className="w-4 h-4" />
+                    {DAY_LABELS[selectedDay]} — No visits yet
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-3">Add clients to build this day's schedule.</p>
+                  <Select onValueChange={(id) => addClientToDay(id, selectedDay)}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select a client to add..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clients.map(c => (
+                        <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </CardContent>
+              </Card>
             ) : (
               <Card className="border-dashed">
                 <CardContent className="py-12 text-center">
