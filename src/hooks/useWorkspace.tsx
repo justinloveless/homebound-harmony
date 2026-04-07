@@ -96,6 +96,10 @@ interface WorkspaceContextValue {
   setTravelTimeErrors: (errors: TravelTimeErrors) => void;
   setSchedule: (schedule: WeekSchedule | null) => void;
   replaceWorkspace: (ws: Workspace) => void;
+  saveSchedule: (name: string) => void;
+  loadSavedSchedule: (id: string) => void;
+  deleteSavedSchedule: (id: string) => void;
+  renameSavedSchedule: (id: string, name: string) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
