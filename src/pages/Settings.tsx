@@ -91,7 +91,7 @@ export default function SettingsPage() {
             </div>
             <div>
               <Label htmlFor="waddr">Home Address</Label>
-              <Input id="waddr" value={form.homeAddress} onChange={e => setForm({ ...form, homeAddress: e.target.value })} placeholder="456 Oak St, City" />
+              <AddressSearch id="waddr" value={form.homeAddress} onChange={homeAddress => setForm({ ...form, homeAddress })} />
             </div>
           </div>
 
