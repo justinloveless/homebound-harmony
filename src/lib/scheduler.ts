@@ -99,6 +99,7 @@ function tryInsertClient(
     }
 
     let arrival = Math.max(prevEndTime + travelToPrev, windowStart);
+    arrival = roundUpToBlock(arrival);
     arrival = adjustForBreaks(arrival, client.visitDurationMinutes, worker);
 
     if (arrival + client.visitDurationMinutes > windowEnd) continue;
