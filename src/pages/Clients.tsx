@@ -331,7 +331,7 @@ export default function Clients() {
                     <Badge variant="outline" className={priorityColor[client.priority]}>
                       {client.priority}
                     </Badge>
-                    <Badge variant="secondary" className="text-xs">{client.frequency}</Badge>
+                    <Badge variant="secondary" className="text-xs">{client.visitsPerPeriod}x {PERIOD_LABELS[client.period]}</Badge>
                   </div>
                   <p className="text-sm text-muted-foreground mt-1 truncate">{client.address}</p>
                   <div className="flex flex-wrap gap-1 mt-2">
