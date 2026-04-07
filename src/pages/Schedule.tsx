@@ -698,7 +698,9 @@ export default function Schedule() {
                       const whEndMin = whEnd[0] * 60 + whEnd[1];
 
                       return (
-                        <div key={day} className="flex-1 min-w-[100px] border-r last:border-r-0 relative" style={{ height: TOTAL_HEIGHT }}>
+                        <div key={day} className={`flex-1 min-w-[100px] border-r last:border-r-0 relative ${isDayOff ? '' : 'cursor-crosshair'}`} style={{ height: TOTAL_HEIGHT }}
+                          onClick={(e) => !isDayOff && handleCalendarClick(e, day, MIN_HEIGHT)}
+                        >
                           {/* Day header (sticky) */}
                           <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
                             {DAY_LABELS[day]}
@@ -751,9 +753,10 @@ export default function Schedule() {
                                 {/* Travel block */}
                                 {v.travelTimeFromPrev > 0 && (
                                   <div
+                                    data-event-block
                                     className="absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer"
                                     style={{ top: travelStart * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
-                                    onClick={() => setSelectedDay(day)}
+                                    onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
                                     title={`${v.travelTimeFromPrev} min drive`}
                                   >
                                     {v.travelTimeFromPrev >= 15 && (
@@ -763,9 +766,10 @@ export default function Schedule() {
                                 )}
                                 {/* Visit block */}
                                 <div
+                                  data-event-block
                                   className="absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden cursor-pointer hover:brightness-110 transition-all"
                                   style={{ top: startMin * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
-                                  onClick={() => setSelectedDay(day)}
+                                  onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
                                   title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)}`}
                                 >
                                   <div className="px-1 py-0.5">
@@ -788,6 +792,7 @@ export default function Schedule() {
                             if (travelHomeMin <= 0) return null;
                             return (
                               <div
+                                data-event-block
                                 className="absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden"
                                 style={{ top: lastEndMin * MIN_HEIGHT, height: Math.max(travelHomeMin * MIN_HEIGHT, 2) }}
                                 title={`${travelHomeMin} min drive home`}
