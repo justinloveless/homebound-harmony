@@ -16,6 +16,13 @@ export const DAY_LABELS: Record<DayOfWeek, string> = {
 export type Frequency = 'weekly' | 'biweekly' | 'monthly';
 export type SchedulePeriod = 'week' | '2weeks' | 'month';
 export type Priority = 'high' | 'medium' | 'low';
+export type SchedulingStrategy = 'pack' | 'alternate' | 'spread';
+
+export const STRATEGY_LABELS: Record<SchedulingStrategy, string> = {
+  pack: 'Pack days (Mon-Tue, Wed-Thu)',
+  alternate: 'Alternate days (Mon/Wed, Tue/Thu)',
+  spread: 'Spread evenly across the week',
+};
 
 export const PERIOD_LABELS: Record<SchedulePeriod, string> = {
   week: 'per week',
@@ -59,6 +66,7 @@ export interface WorkerProfile {
   workingHours: { startTime: string; endTime: string };
   daysOff: DayOfWeek[];
   breaks: { startTime: string; endTime: string; label: string }[];
+  schedulingStrategy: SchedulingStrategy;
 }
 
 
@@ -113,6 +121,7 @@ export const DEFAULT_WORKSPACE: Workspace = {
     workingHours: { startTime: '08:00', endTime: '17:00' },
     daysOff: ['saturday', 'sunday'],
     breaks: [{ startTime: '12:00', endTime: '13:00', label: 'Lunch' }],
+    schedulingStrategy: 'spread',
   },
   clients: [],
   travelTimes: {},

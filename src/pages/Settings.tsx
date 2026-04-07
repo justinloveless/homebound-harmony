@@ -7,8 +7,9 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Download, Upload, Trash2, Plus, Copy } from 'lucide-react';
-import { DAYS_OF_WEEK, DAY_LABELS, type DayOfWeek, type WorkerProfile } from '@/types/models';
+import { DAYS_OF_WEEK, DAY_LABELS, STRATEGY_LABELS, type DayOfWeek, type WorkerProfile, type SchedulingStrategy } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { exportWorkspace, importWorkspace, downloadJson } from '@/lib/storage';
 import { toast } from 'sonner';
 
@@ -124,6 +125,21 @@ export default function SettingsPage() {
                 </label>
               ))}
             </div>
+          </div>
+
+          <div>
+            <Label className="mb-2 block">Scheduling Strategy</Label>
+            <Select value={form.schedulingStrategy ?? 'spread'} onValueChange={(v) => setForm({ ...form, schedulingStrategy: v as SchedulingStrategy })}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.entries(STRATEGY_LABELS) as [SchedulingStrategy, string][]).map(([key, label]) => (
+                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">Controls how clients are distributed across your working days.</p>
           </div>
 
           <div>
