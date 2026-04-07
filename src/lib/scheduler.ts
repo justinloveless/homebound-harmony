@@ -466,6 +466,7 @@ export function recalcDaySchedule(
 
     const travel = getTravelTime(travelTimes, currentLocationId, client.id);
     let arrival = Math.max(currentTime + travel, windowStart);
+    arrival = roundUpToBlock(arrival);
     arrival = adjustForBreaks(arrival, client.visitDurationMinutes, worker);
 
     rebuilt.push({
