@@ -109,6 +109,7 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [workspace, setWorkspace] = useState<Workspace>(DEFAULT_WORKSPACE);
   const [loading, setLoading] = useState(true);
+  const [fileAutoSaveEnabled, setFileAutoSaveEnabled] = useState(false);
 
   useEffect(() => {
     loadWorkspace().then(ws => { setWorkspace(ws); setLoading(false); });
