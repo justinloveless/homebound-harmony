@@ -179,6 +179,32 @@ export default function Schedule() {
     await refineWithGoogle(schedule);
   };
 
+  const handleCreateBlank = () => {
+    const weekStart = getMonday();
+    const workDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+    const days: DaySchedule[] = workDays.map((day, i) => {
+      const dateObj = new Date(weekStart);
+      dateObj.setDate(dateObj.getDate() + DAYS_OF_WEEK.indexOf(day));
+      return {
+        day,
+        date: dateObj.toISOString().split('T')[0],
+        visits: [],
+        totalTravelMinutes: 0,
+        leaveHomeTime: worker.workingHours.startTime,
+        arriveHomeTime: worker.workingHours.startTime,
+      };
+    });
+    const blank: WeekSchedule = {
+      weekStartDate: weekStart,
+      days,
+      totalTravelMinutes: 0,
+      totalTimeAwayMinutes: 0,
+    };
+    setSchedule(blank);
+    setSelectedDay(workDays[0] ?? null);
+    toast.success('Blank schedule created — add clients to each day in the Daily View');
+  };
+
   const selectedDaySchedule = lastSchedule?.days.find(d => d.day === selectedDay);
 
   // --- Manual editing helpers ---
