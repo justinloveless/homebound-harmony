@@ -7,8 +7,9 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Download, Upload, Trash2, Plus, Copy } from 'lucide-react';
-import { DAYS_OF_WEEK, DAY_LABELS, type DayOfWeek, type WorkerProfile } from '@/types/models';
+import { DAYS_OF_WEEK, DAY_LABELS, STRATEGY_LABELS, type DayOfWeek, type WorkerProfile, type SchedulingStrategy } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { exportWorkspace, importWorkspace, downloadJson } from '@/lib/storage';
 import { toast } from 'sonner';
 
