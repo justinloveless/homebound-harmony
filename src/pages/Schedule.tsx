@@ -803,7 +803,37 @@ export default function Schedule() {
                         >
                           {/* Day header (sticky) */}
                           <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
-                            {DAY_LABELS[day]}
+                            <div className="flex items-center justify-center gap-1">
+                              <span>{DAY_LABELS[day]}</span>
+                              {daySchedule && daySchedule.visits.length > 0 && (
+                                <div className="relative">
+                                  <button
+                                    className="p-0.5 rounded hover:bg-muted transition-colors"
+                                    title={`Copy ${DAY_LABELS[day]} to another day`}
+                                    onClick={(e) => { e.stopPropagation(); setCopyMenuDay(copyMenuDay === day ? null : day); }}
+                                  >
+                                    <Copy className="w-3 h-3 text-muted-foreground" />
+                                  </button>
+                                  {copyMenuDay === day && (
+                                    <>
+                                      <div className="fixed inset-0 z-20" onClick={() => setCopyMenuDay(null)} />
+                                      <div className="absolute top-full left-1/2 -translate-x-1/2 z-30 mt-1 bg-popover border rounded-md shadow-md py-1 min-w-[100px]">
+                                        <p className="text-[9px] text-muted-foreground px-2 pb-1">Copy to:</p>
+                                        {DAYS_OF_WEEK.filter(d => d !== day && !worker.daysOff.includes(d)).map(d => (
+                                          <button
+                                            key={d}
+                                            className="w-full text-left px-3 py-1 text-[11px] hover:bg-muted transition-colors"
+                                            onClick={(e) => { e.stopPropagation(); copyDayTo(day, d); }}
+                                          >
+                                            {DAY_LABELS[d]}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                             {daySchedule && (
                               <div className="text-[9px] font-normal text-muted-foreground leading-tight">
                                 {daySchedule.visits.length} visits · {daySchedule.totalTravelMinutes}m
