@@ -331,7 +331,10 @@ export default function Clients() {
       ) : (
         <div className="space-y-3">
           {filtered.map(client => (
-            <Card key={client.id} className="hover:shadow-sm transition-shadow">
+            <Card
+              key={client.id}
+              className={`hover:shadow-sm transition-shadow ${client.excludedFromSchedule ? 'opacity-60 border-dashed' : ''}`}
+            >
               <CardContent className="flex items-start justify-between gap-3 pt-5">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -340,6 +343,11 @@ export default function Clients() {
                       {client.priority}
                     </Badge>
                     <Badge variant="secondary" className="text-xs">{client.visitsPerPeriod}x {PERIOD_LABELS[client.period]}</Badge>
+                    {client.excludedFromSchedule && (
+                      <Badge variant="outline" className="text-xs border-muted-foreground/40 text-muted-foreground">
+                        Not scheduled
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground mt-1 truncate">{client.address}</p>
                   <div className="flex flex-wrap gap-1 mt-2">
@@ -351,13 +359,24 @@ export default function Clients() {
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => handleToggleExclude(client)}
+                    title={client.excludedFromSchedule ? 'Include in schedule' : 'Remove from schedule (keep client)'}
+                  >
+                    {client.excludedFromSchedule
+                      ? <Eye className="w-3.5 h-3.5" />
+                      : <EyeOff className="w-3.5 h-3.5" />}
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleCopy(client)} title="Duplicate client">
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(client)}>
                     <Pencil className="w-3.5 h-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(client.id)}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(client.id)} title="Delete client permanently">
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </div>
