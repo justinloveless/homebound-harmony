@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, Copy, Eye, EyeOff } from 'lucide-react';
 import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, type SchedulePeriod, DAYS_OF_WEEK, DAY_LABELS, PERIOD_LABELS, type Coords } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
 import { toast } from 'sonner';
