@@ -293,17 +293,26 @@ export function generateWeekSchedule(
         const travel = getTravelTime(travelTimes, currentLocationId, c.client.id);
         const windowStart = timeToMinutes(c.window.startTime);
         const windowEnd = timeToMinutes(c.window.endTime);
-        let arrival = Math.max(currentTime + travel, windowStart);
+
+        // For the first visit of the day, the worker can leave home at any time
+        // — they don't have to wait at home from workStart. So treat the
+        // earliest possible arrival as max(workStart, windowStart) and don't
+        // count the time before that as an idle gap.
+        const isFirstVisit = visits.length === 0;
+        const earliestPossible = isFirstVisit
+          ? Math.max(workStart, windowStart)
+          : Math.max(currentTime + travel, windowStart);
+
+        let arrival = earliestPossible;
         arrival = roundUpToBlock(arrival);
         arrival = adjustForBreaks(arrival, c.client.visitDurationMinutes, worker);
 
         if (arrival + c.client.visitDurationMinutes <= windowEnd &&
             arrival + c.client.visitDurationMinutes <= workEnd) {
-          // Primary: minimize idle gap (time spent waiting after travel completes).
-          // Secondary: small penalty for travel time (prefer nearby clients).
-          // Tertiary: priority bias (high-priority clients get a small bonus).
-          const gap = arrival - (currentTime + travel);
-          const priorityBonus = priorityOrder[c.client.priority] * 5; // 0/5/10 minute penalty for med/low
+          // Idle gap = time the worker waits doing nothing after finishing travel.
+          // For the first visit there is no prior travel/idle time to penalize.
+          const gap = isFirstVisit ? 0 : arrival - (currentTime + travel);
+          const priorityBonus = priorityOrder[c.client.priority] * 5;
           const score = gap + travel * 0.25 + priorityBonus;
 
           if (score < bestScore || (score === bestScore && arrival < bestArrival)) {
