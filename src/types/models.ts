@@ -100,6 +100,12 @@ export interface DaySchedule {
   arriveHomeTime: string;
 }
 
+export interface UnmetVisit {
+  clientId: string;
+  /** How many of the client's required visits could not be placed this week */
+  missing: number;
+}
+
 export interface WeekSchedule {
   weekStartDate: string;
   days: DaySchedule[];
@@ -107,6 +113,10 @@ export interface WeekSchedule {
   totalTimeAwayMinutes: number;
   /** Client ID → group label (e.g. "A" or "B") for alternate strategy */
   clientGroups?: Record<string, string>;
+  /** Visits required but unplaced. Empty/undefined = fully scheduled. */
+  unmetVisits?: UnmetVisit[];
+  /** Smallest set of client IDs whose exclusion would let the schedule fit. */
+  recommendedDrops?: string[];
 }
 
 export interface SavedSchedule {
