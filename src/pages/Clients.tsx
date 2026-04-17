@@ -284,6 +284,14 @@ export default function Clients() {
     toast.success('Client removed');
   };
 
+  const handleToggleExclude = (client: Client) => {
+    const next: Client = { ...client, excludedFromSchedule: !client.excludedFromSchedule };
+    updateClient(next);
+    toast.success(next.excludedFromSchedule
+      ? `Removed "${client.name}" from schedule`
+      : `Re-added "${client.name}" to schedule`);
+  };
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between flex-wrap gap-3">
