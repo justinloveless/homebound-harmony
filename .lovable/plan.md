@@ -1,54 +1,49 @@
 
 
-# Home Health Scheduler App
+## Goal
+Revamp scheduling to: (1) minimize each day's "away-from-home span" (leave→arrive home), (2) require fitting every needed visit, (3) warn + recommend drops when infeasible, (4) minimize idle gaps between visits.
 
-## Overview
-A document-driven scheduling app for home health workers that optimizes visit routes for minimal travel time. All data stored locally as JSON files — no backend needed. Works as an installable PWA.
+## Approach: Two-phase optimizer
 
-## Core Data & Setup
+### Phase 1 — Assign visits to days
+For each client, decide which working day(s) get their visits, respecting `visitsNeeded`, `timeWindows`, and the chosen strategy (pack/spread/alternate). Use a constraint-aware greedy: sort clients by (priority, fewest eligible days, longest duration), assign each visit to the day that currently has the most slack and where the client's window exists.
 
-### Worker Profile
-- Home address, name, working hours
-- Personal availability constraints (e.g., no Fridays, lunch break 12-1)
+### Phase 2 — Per-day route + timing optimizer
+For each day, given its assigned client set, find the visit ordering and start times that minimize the **away-from-home span** = `(travel_home_end − leave_home_start)`. Span = total travel + total visit duration + total idle gaps. Visit durations are fixed, so this reduces to **minimizing travel + idle gaps** simultaneously.
 
-### Client Management
-- Add/edit/remove clients via forms
-- Each client: name, address, visit duration, frequency (weekly/biweekly/monthly), priority level
-- Per-client time windows (e.g., Mon 9-12, Wed 2-5)
+Algorithm per day (small client counts, ~3–10):
+- If ≤8 clients: enumerate permutations (8! = 40k, fast). For each permutation:
+  - Compute the earliest-finish, latest-start schedule that respects all time windows (forward pass: arrival = max(prev_end + travel, window_start, block-rounded); reject if exceeds window_end / workEnd / break conflicts).
+  - Then **right-shift the start of the day**: push the first visit as late as possible without violating any later window. This eliminates morning idle.
+  - Score = arriveHome − leaveHome (the span). Track best.
+- If >8 clients: use 2-opt local search starting from nearest-neighbor seed, then apply the same right-shift pass.
 
-### Travel Time Matrix
-- Editable grid where the worker enters estimated drive times between their home and each client, and between clients
-- Smart defaults (e.g., 15 min) with easy override
+This directly minimizes the "away time" the user cares about, while idle gaps fall out naturally (any gap inflates the span).
 
-## Scheduling Engine (Client-Side)
+### Phase 3 — Feasibility check & drop recommendations
+After Phase 1+2, collect unscheduled visits. If any remain:
+- Show a **warning banner** in the Schedule page listing unmet visits.
+- Compute drop recommendations: greedily simulate removing one client at a time (lowest priority first, then most constraining = fewest eligible windows, then longest visit) and re-running the scheduler until all remaining clients fit. List the smallest drop set.
+- Surface this in the existing "Not Scheduled" card with a new "Recommended to drop" section and a one-click "Exclude these from schedule" action (uses existing `excludedFromSchedule` flag).
 
-### Optimization Algorithm
-- Nearest-neighbor heuristic with improvements — runs entirely in the browser
-- Inputs: client constraints, travel times, visit durations, worker availability
-- Optimizes for: lowest total travel time → shortest time away from home
-- Respects all time windows and frequency requirements
+## Files to change
+- **`src/lib/scheduler.ts`** — rewrite `generateWeekSchedule`. Add helpers:
+  - `assignVisitsToDays(...)` — Phase 1
+  - `optimizeDay(visitsForDay, ...)` — Phase 2 (permutation/2-opt + right-shift)
+  - `recommendDrops(worker, clients, travelTimes, weekStartDate)` — Phase 3
+  - Keep existing `recalcDaySchedule` and `tryInsertClient` for manual edits.
+- **`src/types/models.ts`** — add to `WeekSchedule`:
+  ```ts
+  unmetVisits?: Array<{ clientId: string; missing: number }>;
+  recommendedDrops?: string[]; // client IDs
+  ```
+- **`src/pages/Schedule.tsx`** — when `unmetVisits` non-empty, show a destructive alert with the list and a "Drop recommended clients" button that toggles `excludedFromSchedule` and regenerates.
 
-### Schedule Output
-- **Daily view**: Ordered list of visits with start times, travel time between stops, and total time away from home
-- **Weekly view**: Full week calendar grid showing all scheduled visits
-- **Route map**: Visual map of the day's route using Leaflet (free, no API key) with numbered stops and lines connecting them — addresses geocoded via free Nominatim API
+## Behavior preserved
+- 15-min block rounding, breaks, `excludedFromSchedule`, alternate-day mirroring (Phase 1 still pre-assigns to primary days; mirror copy stays as-is), Google Maps refinement, manual editing.
 
-## File Management
-
-### Local Document Storage
-- Save/load workspace as a single JSON file containing all clients, worker profile, travel times, and generated schedules
-- Export/import for manual sync via Google Drive, iCloud, Dropbox, etc.
-- Auto-save to browser storage (IndexedDB) so data persists between sessions
-
-## PWA Support
-- Installable from browser to home screen
-- Works offline after first load
-- Service worker caches app shell; all data is local
-
-## UI Pages
-1. **Dashboard** — Quick overview: today's schedule, next client, total travel time
-2. **Clients** — List/add/edit clients with constraints
-3. **Travel Times** — Matrix editor for drive times between locations
-4. **Schedule** — Generate & view daily/weekly optimized schedule + route map
-5. **Settings** — Worker profile, home address, working hours, file import/export
+## Edge cases
+- Client with no time window on any working day → counted as unmet, recommended to drop.
+- Worker has zero working days → return empty schedule with all visits unmet.
+- Permutation explosion guarded by 8-client threshold per day.
 
