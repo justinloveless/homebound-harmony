@@ -358,8 +358,8 @@ export function generateWeekSchedule(
     for (let v = 0; v < remaining; v++) {
       let placed = false;
 
-      // Try each working day (no day-group restriction in pass 2)
-      for (const day of workingDays) {
+      // Try each primary day (no day-group restriction in pass 2; mirror handled later)
+      for (const day of schedulingDays) {
         if (placed) break;
 
         const window = getClientWindowForDay(client, day);
