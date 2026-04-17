@@ -38,7 +38,7 @@ function getMonday(): string {
 }
 
 export default function Schedule() {
-  const { workspace, setSchedule, saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule } = useWorkspace();
+  const { workspace, setSchedule, saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule, updateClient } = useWorkspace();
   const { worker, clients, travelTimes, lastSchedule } = workspace;
   const savedSchedules = workspace.savedSchedules ?? [];
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
@@ -755,6 +755,71 @@ export default function Schedule() {
           <CardContent className="py-12 text-center">
             <p className="font-medium">Setup required</p>
             <p className="text-sm text-muted-foreground mt-1">Add your profile and clients before generating a schedule</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Unmet visits warning + drop recommendations */}
+      {lastSchedule?.unmetVisits && lastSchedule.unmetVisits.length > 0 && (
+        <Card className="border-destructive bg-destructive/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2 text-destructive">
+              <AlertCircle className="w-4 h-4" />
+              Schedule incomplete — {lastSchedule.unmetVisits.reduce((s, u) => s + u.missing, 0)} visit{lastSchedule.unmetVisits.reduce((s, u) => s + u.missing, 0) === 1 ? '' : 's'} couldn't fit
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="text-xs space-y-0.5">
+              {lastSchedule.unmetVisits.map(u => {
+                const c = clients.find(cl => cl.id === u.clientId);
+                if (!c) return null;
+                return (
+                  <div key={u.clientId} className="flex items-center justify-between">
+                    <span className="truncate">{c.name}</span>
+                    <Badge variant="outline" className="text-[10px] shrink-0">
+                      {u.missing} missing
+                    </Badge>
+                  </div>
+                );
+              })}
+            </div>
+            {lastSchedule.recommendedDrops && lastSchedule.recommendedDrops.length > 0 && (
+              <div className="pt-2 border-t border-destructive/20 space-y-2">
+                <p className="text-xs font-medium">
+                  Recommended to drop ({lastSchedule.recommendedDrops.length}):
+                </p>
+                <div className="text-xs space-y-0.5">
+                  {lastSchedule.recommendedDrops.map(id => {
+                    const c = clients.find(cl => cl.id === id);
+                    if (!c) return null;
+                    return (
+                      <div key={id} className="flex items-center gap-2">
+                        <span className="text-muted-foreground">•</span>
+                        <span className="truncate">{c.name}</span>
+                        <Badge variant="outline" className="text-[10px] shrink-0 ml-auto">
+                          {c.priority}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    const ids = lastSchedule.recommendedDrops ?? [];
+                    for (const id of ids) {
+                      const c = clients.find(cl => cl.id === id);
+                      if (c) updateClient({ ...c, excludedFromSchedule: true });
+                    }
+                    toast.success(`Excluded ${ids.length} client${ids.length === 1 ? '' : 's'} — regenerating...`);
+                    setTimeout(() => handleGenerate(), 100);
+                  }}
+                >
+                  Exclude these & regenerate
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
