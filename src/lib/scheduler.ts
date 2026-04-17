@@ -283,7 +283,7 @@ export function generateWeekSchedule(
 
     while (candidates.length > 0) {
       let bestIdx = -1;
-      let bestGap = Infinity;
+      let bestScore = Infinity;
       let bestArrival = Infinity;
 
       for (let i = 0; i < candidates.length; i++) {
@@ -299,11 +299,15 @@ export function generateWeekSchedule(
 
         if (arrival + c.client.visitDurationMinutes <= windowEnd &&
             arrival + c.client.visitDurationMinutes <= workEnd) {
-          // Idle gap = time the worker waits doing nothing after finishing travel
-          // until the visit can start. Minimizing this packs visits back-to-back.
+          // Primary: minimize idle gap (time spent waiting after travel completes).
+          // Secondary: small penalty for travel time (prefer nearby clients).
+          // Tertiary: priority bias (high-priority clients get a small bonus).
           const gap = arrival - (currentTime + travel);
-          if (gap < bestGap || (gap === bestGap && arrival < bestArrival)) {
-            bestGap = gap;
+          const priorityBonus = priorityOrder[c.client.priority] * 5; // 0/5/10 minute penalty for med/low
+          const score = gap + travel * 0.25 + priorityBonus;
+
+          if (score < bestScore || (score === bestScore && arrival < bestArrival)) {
+            bestScore = score;
             bestArrival = arrival;
             bestIdx = i;
           }
