@@ -189,10 +189,15 @@ export function generateWeekSchedule(
 
   const visitCounts = new Map<string, number>();
   const visitsNeeded = new Map<string, number>();
+  const originalNeeded = new Map<string, number>();
 
+  const strategyEarly: SchedulingStrategy = worker.schedulingStrategy ?? 'spread';
   for (const c of clients) {
     const needed = visitsNeededThisWeek(c, weekIndex);
-    visitsNeeded.set(c.id, needed);
+    originalNeeded.set(c.id, needed);
+    // In alternate mode, primary days carry half the visits; the mirror provides the rest.
+    const primaryNeed = strategyEarly === 'alternate' ? Math.ceil(needed / 2) : needed;
+    visitsNeeded.set(c.id, primaryNeed);
     visitCounts.set(c.id, 0);
   }
 
