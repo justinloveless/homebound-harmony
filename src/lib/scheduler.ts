@@ -202,33 +202,27 @@ export function generateWeekSchedule(
   const strategy: SchedulingStrategy = worker.schedulingStrategy ?? 'spread';
   const clientScheduledDays = new Map<string, Set<DayOfWeek>>();
 
-  // Alternate strategy: pre-assign clients to day groups
+  // Alternate strategy: split working days into two halves; schedule the first
+  // half normally, then mirror those days onto the matching second-half days.
+  // E.g. with Mon-Thu working: schedule Mon & Tue, then copy → Wed & Thu.
+  const halfSize = Math.ceil(workingDays.length / 2);
+  const primaryDays = strategy === 'alternate' ? workingDays.slice(0, halfSize) : workingDays;
+  const mirrorPairs: Array<{ source: DayOfWeek; target: DayOfWeek }> = [];
+  if (strategy === 'alternate') {
+    for (let i = 0; i < halfSize; i++) {
+      const target = workingDays[i + halfSize];
+      if (target) mirrorPairs.push({ source: workingDays[i], target });
+    }
+  }
+
+  // Alternate strategy: pre-assign clients to a single primary day (group A only).
+  // Mirror days will receive duplicates of the primary day's visits.
   const clientDayGroup = new Map<string, Set<number>>();
   if (strategy === 'alternate') {
-    const sortedClients = [...clients].sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
-    let groupACount = 0;
-    let groupBCount = 0;
-    const groupADays = workingDays.filter((_, i) => i % 2 === 0);
-    const groupBDays = workingDays.filter((_, i) => i % 2 === 1);
-
-    for (const client of sortedClients) {
-      const needed = visitsNeeded.get(client.id) ?? 0;
-      if (needed === 0) continue;
-
-      const hasAvailA = groupADays.filter(d => getClientWindowForDay(client, d) !== null).length;
-      const hasAvailB = groupBDays.filter(d => getClientWindowForDay(client, d) !== null).length;
-
-      let assignToA: boolean;
-      if (needed >= 2) {
-        assignToA = (hasAvailA >= needed && hasAvailB >= needed) ? groupACount <= groupBCount : hasAvailA >= hasAvailB;
-      } else {
-        assignToA = (hasAvailA > 0 && hasAvailB > 0) ? groupACount <= groupBCount : hasAvailA > 0;
-      }
-
-      const indices = new Set<number>();
-      workingDays.forEach((_, i) => { if ((i % 2 === 0) === assignToA) indices.add(i); });
-      clientDayGroup.set(client.id, indices);
-      if (assignToA) groupACount += needed; else groupBCount += needed;
+    const allowed = new Set<number>();
+    primaryDays.forEach((_, i) => allowed.add(i));
+    for (const client of clients) {
+      clientDayGroup.set(client.id, allowed);
     }
   }
 
