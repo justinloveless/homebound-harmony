@@ -232,7 +232,8 @@ export function generateWeekSchedule(
   }
 
   // --- PASS 1: Main greedy scheduling ---
-  for (const day of workingDays) {
+  const schedulingDays = strategy === 'alternate' ? primaryDays : workingDays;
+  for (const day of schedulingDays) {
     const dayIdx = workingDays.indexOf(day);
 
     const candidates: CandidateVisit[] = [];
