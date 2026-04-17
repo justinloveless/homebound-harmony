@@ -57,6 +57,8 @@ export interface Client {
   priority: Priority;
   timeWindows: TimeWindow[];
   notes: string;
+  /** When true, the client is kept in the roster but excluded from auto-generated schedules. */
+  excludedFromSchedule?: boolean;
 }
 
 export interface WorkerProfile {

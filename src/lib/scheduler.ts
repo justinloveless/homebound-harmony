@@ -179,11 +179,14 @@ function tryInsertClient(
 
 export function generateWeekSchedule(
   worker: WorkerProfile,
-  clients: Client[],
+  allClients: Client[],
   travelTimes: TravelTimeMatrix,
   weekStartDate: string,
   weekIndex: number = 0,
 ): WeekSchedule {
+  // Exclude clients explicitly removed from the schedule (kept in the roster).
+  const clients = allClients.filter(c => !c.excludedFromSchedule);
+
   const workStart = timeToMinutes(worker.workingHours.startTime);
   const workEnd = timeToMinutes(worker.workingHours.endTime);
 

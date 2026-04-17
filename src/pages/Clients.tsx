@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Pencil, Trash2, Search, Copy } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, Copy, Eye, EyeOff } from 'lucide-react';
 import { type Client, type TimeWindow, type Frequency, type Priority, type DayOfWeek, type SchedulePeriod, DAYS_OF_WEEK, DAY_LABELS, PERIOD_LABELS, type Coords } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
 import { toast } from 'sonner';
@@ -284,6 +284,14 @@ export default function Clients() {
     toast.success('Client removed');
   };
 
+  const handleToggleExclude = (client: Client) => {
+    const next: Client = { ...client, excludedFromSchedule: !client.excludedFromSchedule };
+    updateClient(next);
+    toast.success(next.excludedFromSchedule
+      ? `Removed "${client.name}" from schedule`
+      : `Re-added "${client.name}" to schedule`);
+  };
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -323,7 +331,10 @@ export default function Clients() {
       ) : (
         <div className="space-y-3">
           {filtered.map(client => (
-            <Card key={client.id} className="hover:shadow-sm transition-shadow">
+            <Card
+              key={client.id}
+              className={`hover:shadow-sm transition-shadow ${client.excludedFromSchedule ? 'opacity-60 border-dashed' : ''}`}
+            >
               <CardContent className="flex items-start justify-between gap-3 pt-5">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -332,6 +343,11 @@ export default function Clients() {
                       {client.priority}
                     </Badge>
                     <Badge variant="secondary" className="text-xs">{client.visitsPerPeriod}x {PERIOD_LABELS[client.period]}</Badge>
+                    {client.excludedFromSchedule && (
+                      <Badge variant="outline" className="text-xs border-muted-foreground/40 text-muted-foreground">
+                        Not scheduled
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-sm text-muted-foreground mt-1 truncate">{client.address}</p>
                   <div className="flex flex-wrap gap-1 mt-2">
@@ -343,13 +359,24 @@ export default function Clients() {
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => handleToggleExclude(client)}
+                    title={client.excludedFromSchedule ? 'Include in schedule' : 'Remove from schedule (keep client)'}
+                  >
+                    {client.excludedFromSchedule
+                      ? <Eye className="w-3.5 h-3.5" />
+                      : <EyeOff className="w-3.5 h-3.5" />}
+                  </Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleCopy(client)} title="Duplicate client">
                     <Copy className="w-3.5 h-3.5" />
                   </Button>
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(client)}>
                     <Pencil className="w-3.5 h-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(client.id)}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(client.id)} title="Delete client permanently">
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </div>
