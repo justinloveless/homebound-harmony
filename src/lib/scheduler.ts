@@ -413,6 +413,56 @@ export function generateWeekSchedule(
     }
   }
 
+  // --- Mirror primary days onto target days for alternate strategy ---
+  // Track total scheduled visits per client across primary + mirror so we can
+  // trim duplicates that would exceed the client's actual needed-visit count.
+  if (strategy === 'alternate' && mirrorPairs.length > 0) {
+    const totalScheduled = new Map<string, number>();
+    for (const d of days) {
+      for (const v of d.visits) {
+        totalScheduled.set(v.clientId, (totalScheduled.get(v.clientId) ?? 0) + 1);
+      }
+    }
+
+    for (const { source, target } of mirrorPairs) {
+      const src = days.find(d => d.day === source);
+      if (!src) continue;
+
+      // Build mirrored visits, dropping any that would exceed the client's needed total.
+      const mirroredVisits: ScheduledVisit[] = [];
+      for (const v of src.visits) {
+        const need = originalNeeded.get(v.clientId) ?? 0;
+        const have = totalScheduled.get(v.clientId) ?? 0;
+        if (have >= need) continue;
+        mirroredVisits.push({ ...v });
+        totalScheduled.set(v.clientId, have + 1);
+      }
+
+      if (mirroredVisits.length === 0) continue;
+
+      const dayIndex = DAYS_OF_WEEK.indexOf(target);
+      const dateObj = new Date(weekStartDate);
+      dateObj.setDate(dateObj.getDate() + dayIndex);
+
+      // If the mirrored visit list matches the source exactly, reuse source totals;
+      // otherwise recalc travel home from the last visit.
+      const lastVisit = mirroredVisits[mirroredVisits.length - 1];
+      const travelHome = getTravelTime(travelTimes, lastVisit.clientId, 'home');
+      const totalTravel = mirroredVisits.reduce((s, v) => s + v.travelTimeFromPrev, 0) + travelHome;
+      const leaveHomeTime = minutesToTime(timeToMinutes(mirroredVisits[0].startTime) - mirroredVisits[0].travelTimeFromPrev);
+      const arriveHomeTime = minutesToTime(timeToMinutes(lastVisit.endTime) + travelHome);
+
+      days.push({
+        day: target,
+        date: dateObj.toISOString().split('T')[0],
+        visits: mirroredVisits,
+        totalTravelMinutes: totalTravel,
+        leaveHomeTime,
+        arriveHomeTime,
+      });
+    }
+  }
+
   // Sort days by weekday order
   days.sort((a, b) => DAYS_OF_WEEK.indexOf(a.day) - DAYS_OF_WEEK.indexOf(b.day));
 
@@ -421,13 +471,17 @@ export function generateWeekSchedule(
     return s + (timeToMinutes(d.arriveHomeTime) - timeToMinutes(d.leaveHomeTime));
   }, 0);
 
-  // Build client group map for display
+  // Build client group map for display: A = primary day, B = mirror day
   const clientGroups: Record<string, string> = {};
   if (strategy === 'alternate') {
-    for (const [clientId, indices] of clientDayGroup.entries()) {
-      // Check if all indices are even (Group A) or odd (Group B)
-      const allEven = [...indices].every(i => i % 2 === 0);
-      clientGroups[clientId] = allEven ? 'A' : 'B';
+    const primarySet = new Set<DayOfWeek>(primaryDays);
+    const mirrorSet = new Set<DayOfWeek>(mirrorPairs.map(p => p.target));
+    for (const c of clients) {
+      const onPrimary = days.some(d => primarySet.has(d.day) && d.visits.some(v => v.clientId === c.id));
+      const onMirror = days.some(d => mirrorSet.has(d.day) && d.visits.some(v => v.clientId === c.id));
+      if (onPrimary && onMirror) clientGroups[c.id] = 'A+B';
+      else if (onPrimary) clientGroups[c.id] = 'A';
+      else if (onMirror) clientGroups[c.id] = 'B';
     }
   }
 
