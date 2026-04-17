@@ -283,6 +283,7 @@ export function generateWeekSchedule(
 
     while (candidates.length > 0) {
       let bestIdx = -1;
+      let bestGap = Infinity;
       let bestArrival = Infinity;
 
       for (let i = 0; i < candidates.length; i++) {
@@ -298,7 +299,11 @@ export function generateWeekSchedule(
 
         if (arrival + c.client.visitDurationMinutes <= windowEnd &&
             arrival + c.client.visitDurationMinutes <= workEnd) {
-          if (arrival < bestArrival) {
+          // Idle gap = time the worker waits doing nothing after finishing travel
+          // until the visit can start. Minimizing this packs visits back-to-back.
+          const gap = arrival - (currentTime + travel);
+          if (gap < bestGap || (gap === bestGap && arrival < bestArrival)) {
+            bestGap = gap;
             bestArrival = arrival;
             bestIdx = i;
           }
