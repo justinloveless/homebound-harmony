@@ -20,7 +20,7 @@ export type SchedulingStrategy = 'pack' | 'alternate' | 'spread';
 
 export const STRATEGY_LABELS: Record<SchedulingStrategy, string> = {
   pack: 'Pack days (Mon-Tue, Wed-Thu)',
-  alternate: 'Alternate days (Mon/Wed, Tue/Thu)',
+  alternate: 'Alternate days (Mon→Wed, Tue→Thu mirror)',
   spread: 'Spread evenly across the week',
 };
 
