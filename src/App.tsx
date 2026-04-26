@@ -5,9 +5,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { AppLayout } from "@/components/AppLayout";
-import Dashboard from "./pages/Dashboard";
+import Workspace from "./pages/Workspace";
 import Clients from "./pages/Clients";
-import TravelTimes from "./pages/TravelTimes";
 import Schedule from "./pages/Schedule";
 import SettingsPage from "./pages/Settings";
 import NotFound from "./pages/NotFound";
@@ -23,9 +22,8 @@ const App = () => (
         <BrowserRouter>
           <AppLayout>
             <Routes>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={<Workspace />} />
               <Route path="/clients" element={<Clients />} />
-              <Route path="/travel" element={<TravelTimes />} />
               <Route path="/schedule" element={<Schedule />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFound />} />

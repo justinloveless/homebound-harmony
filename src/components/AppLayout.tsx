@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, Clock, CalendarDays, Settings, Menu, X } from 'lucide-react';
+import { LayoutGrid, Users, CalendarDays, Settings, Menu, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/', label: 'Workspace', icon: LayoutGrid },
   { to: '/clients', label: 'Clients', icon: Users },
-  { to: '/travel', label: 'Travel Times', icon: Clock },
   { to: '/schedule', label: 'Schedule', icon: CalendarDays },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
