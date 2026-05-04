@@ -555,7 +555,7 @@ export default function Schedule() {
 
   /** Handle clicking on the weekly calendar to add a new event */
   const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, pixPerMin: number) => {
-    if (isDragging) return;
+    if (isDragging || justFinishedDragRef.current) return;
     const target = e.target as HTMLElement;
     if (target.closest('[data-event-block]')) return;
 
