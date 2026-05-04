@@ -63,6 +63,7 @@ export default function Schedule() {
   const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
   const [copyMenuDay, setCopyMenuDay] = useState<DayOfWeek | null>(null);
   const [droppedClients, setDroppedClients] = useState<string[]>([]);
+  const [hoveredVisitIndex, setHoveredVisitIndex] = useState<number | null>(null);
   const dayColumnRefs = useRef<Map<DayOfWeek, HTMLDivElement>>(new Map());
 
   const { scheduledClients, unscheduledClients } = useMemo(() => {
