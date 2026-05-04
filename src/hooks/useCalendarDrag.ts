@@ -30,6 +30,8 @@ interface UseCalendarDragOptions {
   dayColumnRefs: React.RefObject<Map<DayOfWeek, HTMLDivElement>>;
   /** Pixels per minute */
   minHeight: number;
+  /** Minute offset from midnight (the first visible minute in the zoomed calendar) */
+  startMinuteOffset?: number;
   /** Worker profile for work hours / breaks */
   worker: WorkerProfile;
   /** All clients */
@@ -41,7 +43,7 @@ interface UseCalendarDragOptions {
 }
 
 export function useCalendarDrag(options: UseCalendarDragOptions) {
-  const { scrollContainerRef, dayColumnRefs, minHeight, worker, clients, schedule, onDrop } = options;
+  const { scrollContainerRef, dayColumnRefs, minHeight, worker, clients, schedule, onDrop, startMinuteOffset = 0 } = options;
 
   const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
   const [dragPosition, setDragPosition] = useState<DragPosition | null>(null);
