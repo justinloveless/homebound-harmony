@@ -1012,13 +1012,22 @@ export default function Schedule() {
 
           <TabsContent value="weekly" className="space-y-4 mt-4">
             {(() => {
-              const hours = Array.from({ length: 24 }, (_, i) => i);
-
               // Working hours
               const whStart = worker.workingHours.startTime.split(':').map(Number);
               const whEnd = worker.workingHours.endTime.split(':').map(Number);
               const whStartMin = whStart[0] * 60 + whStart[1];
               const whEndMin = whEnd[0] * 60 + whEnd[1];
+
+              // Only show hours in the working range (with 1 hour padding)
+              const startHour = Math.max(0, whStart[0] - 1);
+              const endHour = Math.min(24, whEnd[0] + 2);
+              const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
+
+              // Only show working days
+              const workingDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+
+              const VISIBLE_HOURS = endHour - startHour;
+              const ZOOMED_HEIGHT = VISIBLE_HOURS * HOUR_HEIGHT;
 
               return (
                 <div className="border rounded-lg overflow-hidden bg-card">
