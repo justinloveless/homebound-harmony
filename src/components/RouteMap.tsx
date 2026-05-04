@@ -170,11 +170,10 @@ export default function RouteMap({ workerAddress, workerCoords, visits, clients,
 
     polylines.forEach((p, i) => {
       if (hasHighlight) {
-        // The leg FROM visit i is leg index i (leg 0 = home→visit0, leg 1 = visit0→visit1, etc.)
-        // hovering visit i should highlight leg i (arriving at visit i) and leg i+1 (departing to next)
-        const isHighlighted = i === highlightLegIndex || i === highlightLegIndex + 1;
+        // Leg i+1 = departing from visit i to the next stop
+        const isHighlighted = i === highlightLegIndex! + 1;
         p.setOptions({
-          strokeOpacity: isHighlighted ? 1.0 : 0.15,
+          strokeOpacity: isHighlighted ? 1.0 : 0.4,
           strokeWeight: isHighlighted ? 6 : 3,
           strokeColor: isHighlighted ? '#0ea5e9' : '#0891b2',
         });
