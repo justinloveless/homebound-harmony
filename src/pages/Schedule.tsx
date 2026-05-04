@@ -1267,8 +1267,8 @@ export default function Schedule() {
                                   {...dragHandlers}
                                 >
                                   <div className="px-1 py-0.5 flex items-center justify-between gap-1">
+                                    <span className="text-[10px] font-medium truncate">{client?.name}</span>
                                     <span className="text-[9px] opacity-80 shrink-0">{formatTime(v.startTime)}</span>
-                                    <span className="text-[10px] font-medium truncate text-right">{client?.name}</span>
                                   </div>
                                 </div>
                               </React.Fragment>
