@@ -83,6 +83,18 @@ export default function Schedule() {
     }
   }, [lastSchedule]);
 
+  // Default daily view to first day with visits
+  useEffect(() => {
+    if (lastSchedule && selectedDay === null) {
+      const firstDayWithVisits = lastSchedule.days.find(d => d.visits.length > 0);
+      if (firstDayWithVisits) {
+        setSelectedDay(firstDayWithVisits.day);
+      } else if (lastSchedule.days.length > 0) {
+        setSelectedDay(lastSchedule.days[0].day);
+      }
+    }
+  }, [lastSchedule, selectedDay]);
+
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
 
   // ========== Calendar constants (shared between render and drag) ==========
