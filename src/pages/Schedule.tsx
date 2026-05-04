@@ -1125,7 +1125,7 @@ export default function Schedule() {
                           {/* Working hours background */}
                           {(
                             <div className="absolute left-0 right-0 bg-primary/[0.03]"
-                              style={{ top: whStartMin * MIN_HEIGHT, height: (whEndMin - whStartMin) * MIN_HEIGHT }} />
+                              style={{ top: (whStartMin - offsetMin) * MIN_HEIGHT, height: (whEndMin - whStartMin) * MIN_HEIGHT }} />
                           )}
 
                           {/* Break shading */}
@@ -1136,7 +1136,7 @@ export default function Schedule() {
                             const bEndMin = be[0] * 60 + be[1];
                             return (
                               <div key={bi} className="absolute left-0 right-0 bg-muted/40 border-y border-dashed border-muted-foreground/20"
-                                style={{ top: bStartMin * MIN_HEIGHT, height: (bEndMin - bStartMin) * MIN_HEIGHT }}>
+                                style={{ top: (bStartMin - offsetMin) * MIN_HEIGHT, height: (bEndMin - bStartMin) * MIN_HEIGHT }}>
                                 <span className="text-[8px] text-muted-foreground px-0.5 truncate block">{b.label}</span>
                               </div>
                             );
@@ -1147,7 +1147,7 @@ export default function Schedule() {
                             <div
                               className="absolute left-0 right-0 bg-green-500/10 border-y-2 border-green-500/40 z-[5] pointer-events-none"
                               style={{
-                                top: timeToMin(dragWindow.startTime) * MIN_HEIGHT,
+                                top: (timeToMin(dragWindow.startTime) - offsetMin) * MIN_HEIGHT,
                                 height: (timeToMin(dragWindow.endTime) - timeToMin(dragWindow.startTime)) * MIN_HEIGHT,
                               }}
                             >
@@ -1168,7 +1168,7 @@ export default function Schedule() {
                                   : 'border-destructive bg-destructive/10'
                               }`}
                               style={{
-                                top: dragPosition.minuteOfDay * MIN_HEIGHT,
+                                top: (dragPosition.minuteOfDay - offsetMin) * MIN_HEIGHT,
                                 height: activeDrag.durationMinutes * MIN_HEIGHT,
                               }}
                             >
@@ -1214,7 +1214,7 @@ export default function Schedule() {
                                         <div
                                           data-event-block
                                           className={`absolute left-0.5 right-0.5 rounded-sm bg-red-500/30 border-2 border-red-500 overflow-hidden cursor-pointer z-[3] ${isBeingDragged ? 'opacity-30' : ''}`}
-                                          style={{ top: travelStart * MIN_HEIGHT, height: Math.max(overlapMinutes * MIN_HEIGHT, 2) }}
+                                          style={{ top: (travelStart - offsetMin) * MIN_HEIGHT, height: Math.max(overlapMinutes * MIN_HEIGHT, 2) }}
                                           onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
                                           title={`⚠️ Travel overlap: ${overlapMinutes} min conflict`}
                                         >
@@ -1227,8 +1227,8 @@ export default function Schedule() {
                                           <div
                                             data-event-block
                                             className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
-                                            style={{
-                                              top: (prevEndMin!) * MIN_HEIGHT,
+                                             style={{
+                                              top: (prevEndMin! - offsetMin) * MIN_HEIGHT,
                                               height: Math.max((v.travelTimeFromPrev - overlapMinutes) * MIN_HEIGHT, 2),
                                             }}
                                             onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
@@ -1244,7 +1244,7 @@ export default function Schedule() {
                                       <div
                                         data-event-block
                                         className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
-                                        style={{ top: travelStart * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
+                                        style={{ top: (travelStart - offsetMin) * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
                                         onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
                                         title={`${v.travelTimeFromPrev} min drive`}
                                       >
@@ -1261,7 +1261,7 @@ export default function Schedule() {
                                   className={`absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden transition-all touch-none ${
                                     isBeingDragged ? 'opacity-30 cursor-grabbing' : 'cursor-grab hover:brightness-110'
                                   }`}
-                                  style={{ top: startMin * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
+                                  style={{ top: (startMin - offsetMin) * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
                                   onClick={(e) => handleEditVisit(e, day, i, v)}
                                   title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)} (drag to move)`}
                                   {...dragHandlers}
@@ -1288,7 +1288,7 @@ export default function Schedule() {
                               <div
                                 data-event-block
                                 className="absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden"
-                                style={{ top: lastEndMin * MIN_HEIGHT, height: Math.max(travelHomeMin * MIN_HEIGHT, 2) }}
+                                style={{ top: (lastEndMin - offsetMin) * MIN_HEIGHT, height: Math.max(travelHomeMin * MIN_HEIGHT, 2) }}
                                 title={`${travelHomeMin} min drive home`}
                               >
                                 {travelHomeMin >= 15 && (
