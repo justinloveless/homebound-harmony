@@ -1596,7 +1596,8 @@ export default function Schedule() {
                         <span className="font-semibold">{formatTime(selectedDaySchedule.leaveHomeTime)} – {formatTime(selectedDaySchedule.arriveHomeTime)}</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                    <div className={`flex items-center gap-3 text-sm text-muted-foreground rounded-md transition-colors ${hoveredVisitIndex === -1 ? 'bg-accent/50' : ''}`}
+                      onMouseEnter={() => setHoveredVisitIndex(-1)} onMouseLeave={() => setHoveredVisitIndex(null)}>
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold">🏠</div>
                       <div>
                         <p className="font-medium text-foreground">Leave Home</p>
