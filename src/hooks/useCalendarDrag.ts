@@ -295,6 +295,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     dragClientWindows,
     isValidDropPosition,
     createDragHandlers,
+    justFinishedDragRef,
   };
 }
 
