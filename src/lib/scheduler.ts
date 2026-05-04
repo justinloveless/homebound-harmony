@@ -810,7 +810,7 @@ export function recalcDaySchedule(
 
     let arrival: number;
     if (preserveManualTimes && manualStart > 0) {
-      // Respect the manually set time even if travel overlaps
+      // Respect ALL manually set times, not just the dragged visit
       arrival = manualStart;
     } else {
       arrival = manualStart > earliest ? manualStart : earliest;
