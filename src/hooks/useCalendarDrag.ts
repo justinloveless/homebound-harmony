@@ -116,8 +116,8 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     const wasDragging = isDraggingRef.current && hasMovedRef.current;
 
     if (wasDragging && dragInfoRef.current) {
-      // Get final position
-      const pos = dragPosition;
+      // Use ref to get the latest position (avoids stale closure)
+      const pos = dragPositionRef.current;
       if (pos) {
         onDrop({
           day: pos.day,
@@ -135,6 +135,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
 
     // Reset
     dragInfoRef.current = null;
+    dragPositionRef.current = null;
     startPosRef.current = null;
     hasMovedRef.current = false;
     isDraggingRef.current = false;
@@ -142,7 +143,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     setDragInfo(null);
     setDragPosition(null);
     setGhostPos(null);
-  }, [dragPosition, onDrop]);
+  }, [onDrop]);
 
   // Attach global listeners when dragging
   useEffect(() => {
