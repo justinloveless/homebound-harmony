@@ -1028,6 +1028,7 @@ export default function Schedule() {
 
               const VISIBLE_HOURS = endHour - startHour;
               const ZOOMED_HEIGHT = VISIBLE_HOURS * HOUR_HEIGHT;
+              const offsetMin = startHour * 60; // minute offset for positioning
 
               return (
                 <div className="border rounded-lg overflow-hidden bg-card">
