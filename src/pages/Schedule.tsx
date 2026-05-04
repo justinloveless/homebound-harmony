@@ -1669,6 +1669,7 @@ export default function Schedule() {
                   workerCoords={worker.homeCoords}
                   visits={selectedDaySchedule.visits}
                   clients={clients}
+                  highlightLegIndex={hoveredVisitIndex}
                 />
               </div>
             ) : selectedDay ? (
