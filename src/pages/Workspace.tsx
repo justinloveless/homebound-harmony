@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Clock, CalendarDays, Coffee, Plus, X, Pencil, Check } from 'lucide-react';
+import { Clock, CalendarDays, Pencil, Check, X } from 'lucide-react';
 import { formatTime } from '@/lib/format-time';
 import { toast } from 'sonner';
 import Clients from './Clients';
@@ -33,24 +33,6 @@ function WorkerAvailability() {
     }));
   };
 
-  const addBreak = () => {
-    setForm(prev => ({
-      ...prev,
-      breaks: [...prev.breaks, { startTime: '12:00', endTime: '13:00', label: '' }],
-    }));
-  };
-
-  const removeBreak = (i: number) => {
-    setForm(prev => ({ ...prev, breaks: prev.breaks.filter((_, idx) => idx !== i) }));
-  };
-
-  const updateBreak = (i: number, field: string, value: string) => {
-    setForm(prev => {
-      const breaks = [...prev.breaks];
-      breaks[i] = { ...breaks[i], [field]: value };
-      return { ...prev, breaks };
-    });
-  };
 
   const handleSave = () => {
     updateWorker(form);
@@ -98,19 +80,6 @@ function WorkerAvailability() {
               ))}
             </div>
           </div>
-          {worker.breaks.length > 0 && (
-            <div className="flex items-start gap-2 text-sm">
-              <Coffee className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
-              <span className="text-muted-foreground">Breaks:</span>
-              <div className="flex flex-col gap-0.5">
-                {worker.breaks.map((b, i) => (
-                  <span key={i} className="font-medium">
-                    {b.label} ({formatTime(b.startTime)} – {formatTime(b.endTime)})
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
     );
@@ -165,32 +134,6 @@ function WorkerAvailability() {
                 {DAY_LABELS[d]}
               </Badge>
             ))}
-          </div>
-        </div>
-
-        {/* Breaks */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-            <Coffee className="h-3.5 w-3.5" /> Breaks
-          </label>
-          <div className="space-y-2">
-            {form.breaks.map((b, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Input className="h-8 text-sm flex-1" placeholder="Label" value={b.label}
-                  onChange={e => updateBreak(i, 'label', e.target.value)} />
-                <Input type="time" className="h-8 text-sm w-28" value={b.startTime}
-                  onChange={e => updateBreak(i, 'startTime', e.target.value)} />
-                <span className="text-muted-foreground text-xs">–</span>
-                <Input type="time" className="h-8 text-sm w-28" value={b.endTime}
-                  onChange={e => updateBreak(i, 'endTime', e.target.value)} />
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => removeBreak(i)}>
-                  <X className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </div>
-            ))}
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addBreak}>
-              <Plus className="h-3 w-3 mr-1" /> Add Break
-            </Button>
           </div>
         </div>
       </CardContent>
