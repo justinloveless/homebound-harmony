@@ -136,32 +136,6 @@ function WorkerAvailability() {
             ))}
           </div>
         </div>
-
-        {/* Breaks */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-            <Coffee className="h-3.5 w-3.5" /> Breaks
-          </label>
-          <div className="space-y-2">
-            {form.breaks.map((b, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <Input className="h-8 text-sm flex-1" placeholder="Label" value={b.label}
-                  onChange={e => updateBreak(i, 'label', e.target.value)} />
-                <Input type="time" className="h-8 text-sm w-28" value={b.startTime}
-                  onChange={e => updateBreak(i, 'startTime', e.target.value)} />
-                <span className="text-muted-foreground text-xs">–</span>
-                <Input type="time" className="h-8 text-sm w-28" value={b.endTime}
-                  onChange={e => updateBreak(i, 'endTime', e.target.value)} />
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => removeBreak(i)}>
-                  <X className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </div>
-            ))}
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addBreak}>
-              <Plus className="h-3 w-3 mr-1" /> Add Break
-            </Button>
-          </div>
-        </div>
       </CardContent>
     </Card>
   );
