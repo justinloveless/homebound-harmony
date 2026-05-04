@@ -1716,12 +1716,16 @@ function resolveConflicts(
   const dropStart = timeToMin(droppedVisit.startTime);
   const dropEnd = timeToMin(droppedVisit.endTime);
 
-  // Separate into: before, overlapping, and after
+  // Manually placed visits are immovable - they stay where they are
+  const manualVisits = existingVisits.filter(v => v.manuallyPlaced);
+  const movableVisits = existingVisits.filter(v => !v.manuallyPlaced);
+
+  // Separate movable visits into: before, overlapping, and after
   const before: ScheduledVisit[] = [];
   const after: ScheduledVisit[] = [];
   const overlapping: ScheduledVisit[] = [];
 
-  for (const v of existingVisits) {
+  for (const v of movableVisits) {
     const vStart = timeToMin(v.startTime);
     const vEnd = timeToMin(v.endTime);
     if (vEnd <= dropStart) {
@@ -1733,33 +1737,50 @@ function resolveConflicts(
     }
   }
 
-  // Sort by start time
   before.sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
   after.sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
   overlapping.sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
 
-  // Build the resolved list: before + dropped + only shift what actually conflicts
-  const resolved: ScheduledVisit[] = [...before, droppedVisit];
+  // Start with before visits + manual visits (keep in place) + dropped visit
+  const resolved: ScheduledVisit[] = [...before, ...manualVisits, droppedVisit];
   const removed: string[] = [];
 
-  // Only overlapping visits need to be shifted; "after" visits keep their original times
-  // unless a shifted overlapping visit pushes into them
+  // Helper to get the previous client ID for travel time calculation
+  function getPrevClientId(endMinute: number): string {
+    // Find the visit that ends closest to (and at or before) endMinute
+    let prevId = 'home';
+    let closestEnd = -1;
+    for (const r of resolved) {
+      const rEnd = timeToMin(r.endTime);
+      if (rEnd <= endMinute && rEnd > closestEnd) {
+        closestEnd = rEnd;
+        prevId = r.clientId;
+      }
+    }
+    return prevId;
+  }
+
   let currentEnd = dropEnd;
 
-  // Process overlapping visits - these MUST be shifted
-  for (const v of overlapping) {
+  // Helper to try placing a bumped visit with travel time
+  function tryPlaceVisit(v: ScheduledVisit, afterMinute: number): boolean {
     const client = allClients.find(c => c.id === v.clientId);
-    if (!client) { removed.push(v.clientId); continue; }
+    if (!client) { removed.push(v.clientId); return false; }
 
     const tw = client.timeWindows.find(w => w.day === day);
-    if (!tw) { removed.push(v.clientId); continue; }
+    if (!tw) { removed.push(v.clientId); return false; }
 
     const twStart = timeToMin(tw.startTime);
     const twEnd = timeToMin(tw.endTime);
 
-    let newStart = Math.max(currentEnd, twStart);
+    // Add travel time from previous visit
+    const prevId = getPrevClientId(afterMinute);
+    const travel = getTravel(travelTimes, prevId, client.id);
+
+    let newStart = Math.max(afterMinute + travel, twStart);
     newStart = Math.ceil(newStart / 15) * 15;
 
+    // Skip breaks
     for (const b of worker.breaks) {
       const bs = timeToMin(b.startTime);
       const be = timeToMin(b.endTime);
@@ -1772,6 +1793,7 @@ function resolveConflicts(
     const newEnd = newStart + client.visitDurationMinutes;
 
     if (newEnd > twEnd || newEnd > whEnd) {
+      // Try placing before the dropped visit instead
       const beforeStart = findSlotBefore(v.clientId, client, day, worker, resolved, whStart);
       if (beforeStart !== null) {
         const bEnd = beforeStart + client.visitDurationMinutes;
@@ -1787,22 +1809,28 @@ function resolveConflicts(
           insertIdx = i + 1;
         }
         resolved.splice(insertIdx, 0, insertVisit);
-        continue;
+        return true;
       }
       removed.push(v.clientId);
-      continue;
+      return false;
     }
 
     resolved.push({
       clientId: v.clientId,
       startTime: minToTime(newStart),
       endTime: minToTime(newEnd),
-      travelTimeFromPrev: 0,
+      travelTimeFromPrev: travel,
     });
     currentEnd = newEnd;
+    return true;
   }
 
-  // Process "after" visits - keep original times unless they now conflict with shifted visits
+  // Process overlapping visits - these MUST be shifted (with travel time)
+  for (const v of overlapping) {
+    tryPlaceVisit(v, currentEnd);
+  }
+
+  // Process "after" visits - keep original times unless they conflict
   for (const v of after) {
     const vStart = timeToMin(v.startTime);
     const vEnd = timeToMin(v.endTime);
@@ -1812,59 +1840,8 @@ function resolveConflicts(
       resolved.push(v);
       currentEnd = vEnd;
     } else {
-      // Conflict with a shifted overlapping visit - need to shift this one too
-      const client = allClients.find(c => c.id === v.clientId);
-      if (!client) { removed.push(v.clientId); continue; }
-
-      const tw = client.timeWindows.find(w => w.day === day);
-      if (!tw) { removed.push(v.clientId); continue; }
-
-      const twStart = timeToMin(tw.startTime);
-      const twEnd = timeToMin(tw.endTime);
-
-      let newStart = Math.max(currentEnd, twStart);
-      newStart = Math.ceil(newStart / 15) * 15;
-
-      for (const b of worker.breaks) {
-        const bs = timeToMin(b.startTime);
-        const be = timeToMin(b.endTime);
-        if (newStart < be && newStart + client.visitDurationMinutes > bs) {
-          newStart = be;
-          newStart = Math.ceil(newStart / 15) * 15;
-        }
-      }
-
-      const newEnd = newStart + client.visitDurationMinutes;
-
-      if (newEnd > twEnd || newEnd > whEnd) {
-        const beforeStart = findSlotBefore(v.clientId, client, day, worker, resolved, whStart);
-        if (beforeStart !== null) {
-          const bEnd = beforeStart + client.visitDurationMinutes;
-          const insertVisit: ScheduledVisit = {
-            clientId: v.clientId,
-            startTime: minToTime(beforeStart),
-            endTime: minToTime(bEnd),
-            travelTimeFromPrev: 0,
-          };
-          let insertIdx = 0;
-          for (let i = 0; i < resolved.length; i++) {
-            if (timeToMin(resolved[i].startTime) > beforeStart) break;
-            insertIdx = i + 1;
-          }
-          resolved.splice(insertIdx, 0, insertVisit);
-          continue;
-        }
-        removed.push(v.clientId);
-        continue;
-      }
-
-      resolved.push({
-        clientId: v.clientId,
-        startTime: minToTime(newStart),
-        endTime: minToTime(newEnd),
-        travelTimeFromPrev: 0,
-      });
-      currentEnd = newEnd;
+      // Conflict with a shifted visit - need to shift (with travel time)
+      tryPlaceVisit(v, currentEnd);
     }
   }
 
