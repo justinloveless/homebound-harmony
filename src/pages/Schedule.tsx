@@ -268,6 +268,7 @@ export default function Schedule() {
     scrollContainerRef: calendarScrollRef,
     dayColumnRefs,
     minHeight: MIN_HEIGHT,
+    startMinuteOffset: calStartMinuteOffset,
     worker,
     clients,
     schedule: lastSchedule,
