@@ -1047,7 +1047,7 @@ export default function Schedule() {
                   <div ref={calendarScrollRef} className={`flex overflow-x-auto overflow-y-auto max-h-[600px] ${isDragging ? 'select-none' : ''}`}
                     style={{ scrollBehavior: isDragging ? 'auto' : 'smooth' }}>
                     {/* Time labels column */}
-                    <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: TOTAL_HEIGHT }}>
+                    <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: ZOOMED_HEIGHT }}>
                       {hours.map(h => (
                         <div key={h} className="border-b border-border/50 text-[10px] text-muted-foreground text-right pr-1.5 pt-0.5" style={{ height: HOUR_HEIGHT }}>
                           {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}
@@ -1056,9 +1056,8 @@ export default function Schedule() {
                     </div>
 
                     {/* Day columns */}
-                    {DAYS_OF_WEEK.map(day => {
+                    {workingDays.map(day => {
                       const daySchedule = lastSchedule.days.find(d => d.day === day);
-                      const isDayOff = worker.daysOff.includes(day);
 
                       // Time window highlight for dragged client on this day
                       const dragWindow = isDragging && activeDrag
