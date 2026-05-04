@@ -63,6 +63,7 @@ export default function Schedule() {
   const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
   const [copyMenuDay, setCopyMenuDay] = useState<DayOfWeek | null>(null);
   const [droppedClients, setDroppedClients] = useState<string[]>([]);
+  const [hoveredVisitIndex, setHoveredVisitIndex] = useState<number | null>(null);
   const dayColumnRefs = useRef<Map<DayOfWeek, HTMLDivElement>>(new Map());
 
   const { scheduledClients, unscheduledClients } = useMemo(() => {
@@ -1559,7 +1560,7 @@ export default function Schedule() {
                 const visitCount = dayData?.visits.length ?? 0;
                 return (
                   <Button key={day} variant={selectedDay === day ? 'default' : 'outline'} size="sm"
-                    onClick={() => setSelectedDay(day)}>
+                    onClick={() => { setSelectedDay(day); setHoveredVisitIndex(null); }}>
                     {DAY_LABELS[day]} {visitCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{visitCount}</Badge>}
                   </Button>
                 );
@@ -1605,7 +1606,7 @@ export default function Schedule() {
                     {selectedDaySchedule.visits.map((visit, i) => {
                       const client = clients.find(c => c.id === visit.clientId);
                       return (
-                        <div key={i}>
+                        <div key={i} onMouseEnter={() => setHoveredVisitIndex(i)} onMouseLeave={() => setHoveredVisitIndex(null)} className={`rounded-md transition-colors ${hoveredVisitIndex === i ? 'bg-accent/50' : ''}`}>
                           <div className="flex items-center gap-2 ml-4 text-[10px] text-muted-foreground py-1">
                             <div className="w-px h-4 bg-border" />
                             <Clock className="w-3 h-3" /> {visit.travelTimeFromPrev} min{visit.travelDistanceMiFromPrev != null ? ` · ${visit.travelDistanceMiFromPrev} mi` : ''} drive
@@ -1668,6 +1669,7 @@ export default function Schedule() {
                   workerCoords={worker.homeCoords}
                   visits={selectedDaySchedule.visits}
                   clients={clients}
+                  highlightLegIndex={hoveredVisitIndex}
                 />
               </div>
             ) : selectedDay ? (
