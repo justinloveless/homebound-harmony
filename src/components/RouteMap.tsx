@@ -166,7 +166,7 @@ export default function RouteMap({ workerAddress, workerCoords, visits, clients,
     const polylines = legPolylines.current;
     if (polylines.length === 0) return;
 
-    const hasHighlight = highlightLegIndex != null && highlightLegIndex >= 0;
+    const hasHighlight = highlightLegIndex != null;
 
     polylines.forEach((p, i) => {
       if (hasHighlight) {
