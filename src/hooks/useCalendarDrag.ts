@@ -108,6 +108,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     setGhostPos({ x: clientX, y: clientY });
 
     const pos = getDayAndMinute(clientX, clientY);
+    dragPositionRef.current = pos;
     setDragPosition(pos);
   }, [getDayAndMinute]);
 
