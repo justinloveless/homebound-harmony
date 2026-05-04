@@ -190,12 +190,13 @@ export default function Schedule() {
       updatedDays.push(targetDay);
     }
 
-    // 3. Create the dragged visit
+    // 3. Create the dragged visit (marked as manually placed)
     const droppedVisit: ScheduledVisit = {
       clientId: client.id,
       startTime: minToTime(dropStart),
       endTime: minToTime(dropEnd),
       travelTimeFromPrev: 0,
+      manuallyPlaced: true,
     };
 
     // 4. Insert and resolve conflicts by bumping
