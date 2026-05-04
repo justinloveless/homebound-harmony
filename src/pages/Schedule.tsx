@@ -76,20 +76,12 @@ export default function Schedule() {
     };
   }, [lastSchedule, clients]);
 
-  // Auto-scroll calendar to working hours
-  const scrollToWorkHours = useCallback(() => {
-    if (calendarScrollRef.current) {
-      const whStart = worker.workingHours.startTime.split(':').map(Number);
-      const scrollTo = Math.max(0, (whStart[0] - 1) * 48); // 1 hour before work start
-      calendarScrollRef.current.scrollTop = scrollTo;
-    }
-  }, [worker.workingHours.startTime]);
-
+  // Auto-scroll calendar to top when schedule loads (already zoomed to working hours)
   useEffect(() => {
-    if (lastSchedule) {
-      setTimeout(scrollToWorkHours, 100);
+    if (lastSchedule && calendarScrollRef.current) {
+      calendarScrollRef.current.scrollTop = 0;
     }
-  }, [lastSchedule, scrollToWorkHours]);
+  }, [lastSchedule]);
 
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
 
