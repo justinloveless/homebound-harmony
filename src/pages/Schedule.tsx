@@ -609,8 +609,8 @@ export default function Schedule() {
     if (target.closest('[data-event-block]')) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const yOffset = e.clientY - rect.top + (calendarScrollRef.current?.scrollTop ?? 0);
-    const totalMinutes = yOffset / pixPerMin;
+    const yOffset = e.clientY - rect.top;
+    const totalMinutes = (yOffset / pixPerMin) + calStartMinuteOffset;
     const roundedMinutes = Math.round(totalMinutes / 15) * 15;
     const clampedMinutes = Math.max(0, Math.min(roundedMinutes, 24 * 60 - 15));
     const hours = Math.floor(clampedMinutes / 60);
