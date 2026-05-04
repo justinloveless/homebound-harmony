@@ -80,7 +80,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
       }
     }
     return null;
-  }, [dayColumnRefs, scrollContainerRef, minHeight]);
+  }, [dayColumnRefs, scrollContainerRef, minHeight, startMinuteOffset]);
 
   const handlePointerDown = useCallback((
     clientX: number,
