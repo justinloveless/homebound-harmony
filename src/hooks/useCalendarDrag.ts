@@ -73,7 +73,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
         // rect.top already accounts for scroll position since the column
         // is a child of the scroll container with full height
         const yInColumn = clientY - rect.top;
-        const rawMinutes = yInColumn / minHeight;
+        const rawMinutes = (yInColumn / minHeight) + startMinuteOffset;
         const snapped = Math.round(rawMinutes / 15) * 15;
         const clamped = Math.max(0, Math.min(snapped, 24 * 60 - 15));
         return { day, minuteOfDay: clamped };
