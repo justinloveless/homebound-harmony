@@ -809,8 +809,11 @@ export function recalcDaySchedule(
     const manualStart = v.startTime !== '00:00' ? timeToMinutes(v.startTime) : 0;
 
     let arrival: number;
-    if (preserveManualTimes && manualStart > 0) {
-      // Respect ALL manually set times, not just the dragged visit
+    if (preserveManualTimes && v.manuallyPlaced && manualStart > 0) {
+      // Only respect manually placed visits' times (allow travel overlap for these)
+      arrival = manualStart;
+    } else if (preserveManualTimes && manualStart > 0 && manualStart >= earliest) {
+      // Non-manual visits: keep their time if it already works, but never overlap travel
       arrival = manualStart;
     } else {
       arrival = manualStart > earliest ? manualStart : earliest;

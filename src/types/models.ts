@@ -89,6 +89,7 @@ export interface ScheduledVisit {
   endTime: string;
   travelTimeFromPrev: number; // minutes
   travelDistanceMiFromPrev?: number; // miles
+  manuallyPlaced?: boolean; // true if user manually dragged this visit
 }
 
 export interface DaySchedule {
