@@ -1692,7 +1692,11 @@ export default function Schedule() {
 // =============================================================================
 
 import type { Client as ClientType, WorkerProfile as WorkerType, TravelTimeMatrix as TTMatrix } from '@/types/models';
+import { travelKey, DEFAULT_TRAVEL_TIME } from '@/types/models';
 
+function getTravel(matrix: TTMatrix, a: string, b: string): number {
+  return matrix[travelKey(a, b)] ?? DEFAULT_TRAVEL_TIME;
+}
 /**
  * Resolve conflicts when dropping a visit onto a day.
  * - Places the dropped visit at its exact time
