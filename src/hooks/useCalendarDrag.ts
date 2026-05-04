@@ -53,6 +53,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
   // Refs to avoid stale closures
   const dragInfoRef = useRef<DragInfo | null>(null);
   const dragPositionRef = useRef<DragPosition | null>(null);
+  const lastLoggedDragPositionRef = useRef<string | null>(null);
   const isDraggingRef = useRef(false);
   const startPosRef = useRef<{ x: number; y: number } | null>(null);
   const hasMovedRef = useRef(false);
@@ -84,6 +85,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     clientY: number,
     info: DragInfo,
   ) => {
+    console.debug('[calendar-drag] pointer down', { clientX, clientY, info });
     dragInfoRef.current = info;
     startPosRef.current = { x: clientX, y: clientY };
     hasMovedRef.current = false;
@@ -99,6 +101,11 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
       if (Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
       hasMovedRef.current = true;
       isDraggingRef.current = true;
+      console.debug('[calendar-drag] drag started', {
+        dragInfo: dragInfoRef.current,
+        start: startPosRef.current,
+        current: { x: clientX, y: clientY },
+      });
       setIsDragging(true);
       setDragInfo(dragInfoRef.current);
     }
@@ -109,21 +116,42 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
 
     const pos = getDayAndMinute(clientX, clientY);
     dragPositionRef.current = pos;
+    const logKey = pos ? `${pos.day}-${pos.minuteOfDay}` : 'outside-calendar';
+    if (lastLoggedDragPositionRef.current !== logKey) {
+      lastLoggedDragPositionRef.current = logKey;
+      console.debug('[calendar-drag] drag position changed', { clientX, clientY, pos });
+    }
     setDragPosition(pos);
   }, [getDayAndMinute]);
 
   const handlePointerUp = useCallback(() => {
     const wasDragging = isDraggingRef.current && hasMovedRef.current;
+    const finalPosition = dragPositionRef.current;
+
+    console.debug('[calendar-drag] pointer up', {
+      wasDragging,
+      dragInfo: dragInfoRef.current,
+      finalPosition,
+      hasMoved: hasMovedRef.current,
+      isDragging: isDraggingRef.current,
+    });
 
     if (wasDragging && dragInfoRef.current) {
       // Use ref to get the latest position (avoids stale closure)
-      const pos = dragPositionRef.current;
+      const pos = finalPosition;
       if (pos) {
+        console.debug('[calendar-drag] dispatching drop', {
+          day: pos.day,
+          startMinute: pos.minuteOfDay,
+          dragInfo: dragInfoRef.current,
+        });
         onDrop({
           day: pos.day,
           startMinute: pos.minuteOfDay,
           dragInfo: dragInfoRef.current,
         });
+      } else {
+        console.debug('[calendar-drag] drop skipped: no final calendar position');
       }
     }
 
@@ -136,6 +164,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     // Reset
     dragInfoRef.current = null;
     dragPositionRef.current = null;
+    lastLoggedDragPositionRef.current = null;
     startPosRef.current = null;
     hasMovedRef.current = false;
     isDraggingRef.current = false;
