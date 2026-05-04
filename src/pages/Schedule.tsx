@@ -76,20 +76,12 @@ export default function Schedule() {
     };
   }, [lastSchedule, clients]);
 
-  // Auto-scroll calendar to working hours
-  const scrollToWorkHours = useCallback(() => {
-    if (calendarScrollRef.current) {
-      const whStart = worker.workingHours.startTime.split(':').map(Number);
-      const scrollTo = Math.max(0, (whStart[0] - 1) * 48); // 1 hour before work start
-      calendarScrollRef.current.scrollTop = scrollTo;
-    }
-  }, [worker.workingHours.startTime]);
-
+  // Auto-scroll calendar to top when schedule loads (already zoomed to working hours)
   useEffect(() => {
-    if (lastSchedule) {
-      setTimeout(scrollToWorkHours, 100);
+    if (lastSchedule && calendarScrollRef.current) {
+      calendarScrollRef.current.scrollTop = 0;
     }
-  }, [lastSchedule, scrollToWorkHours]);
+  }, [lastSchedule]);
 
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
 
@@ -97,6 +89,13 @@ export default function Schedule() {
   const HOUR_HEIGHT = 48;
   const TOTAL_HEIGHT = 24 * HOUR_HEIGHT;
   const MIN_HEIGHT = TOTAL_HEIGHT / (24 * 60);
+
+  // Zoomed view: only show working hours with 1hr padding
+  const calStartHour = useMemo(() => {
+    const whStart = worker.workingHours.startTime.split(':').map(Number);
+    return Math.max(0, whStart[0] - 1);
+  }, [worker.workingHours.startTime]);
+  const calStartMinuteOffset = calStartHour * 60;
 
   // ========== Drag-and-drop handler ==========
   const handleDrop = useCallback((result: DropResult) => {
@@ -261,6 +260,7 @@ export default function Schedule() {
     scrollContainerRef: calendarScrollRef,
     dayColumnRefs,
     minHeight: MIN_HEIGHT,
+    startMinuteOffset: calStartMinuteOffset,
     worker,
     clients,
     schedule: lastSchedule,
@@ -601,8 +601,8 @@ export default function Schedule() {
     if (target.closest('[data-event-block]')) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const yOffset = e.clientY - rect.top + (calendarScrollRef.current?.scrollTop ?? 0);
-    const totalMinutes = yOffset / pixPerMin;
+    const yOffset = e.clientY - rect.top;
+    const totalMinutes = (yOffset / pixPerMin) + calStartMinuteOffset;
     const roundedMinutes = Math.round(totalMinutes / 15) * 15;
     const clampedMinutes = Math.max(0, Math.min(roundedMinutes, 24 * 60 - 15));
     const hours = Math.floor(clampedMinutes / 60);
@@ -1012,13 +1012,23 @@ export default function Schedule() {
 
           <TabsContent value="weekly" className="space-y-4 mt-4">
             {(() => {
-              const hours = Array.from({ length: 24 }, (_, i) => i);
-
               // Working hours
               const whStart = worker.workingHours.startTime.split(':').map(Number);
               const whEnd = worker.workingHours.endTime.split(':').map(Number);
               const whStartMin = whStart[0] * 60 + whStart[1];
               const whEndMin = whEnd[0] * 60 + whEnd[1];
+
+              // Only show hours in the working range (with 1 hour padding)
+              const startHour = Math.max(0, whStart[0] - 1);
+              const endHour = Math.min(24, whEnd[0] + 2);
+              const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
+
+              // Only show working days
+              const workingDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+
+              const VISIBLE_HOURS = endHour - startHour;
+              const ZOOMED_HEIGHT = VISIBLE_HOURS * HOUR_HEIGHT;
+              const offsetMin = startHour * 60; // minute offset for positioning
 
               return (
                 <div className="border rounded-lg overflow-hidden bg-card">
@@ -1038,7 +1048,7 @@ export default function Schedule() {
                   <div ref={calendarScrollRef} className={`flex overflow-x-auto overflow-y-auto max-h-[600px] ${isDragging ? 'select-none' : ''}`}
                     style={{ scrollBehavior: isDragging ? 'auto' : 'smooth' }}>
                     {/* Time labels column */}
-                    <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: TOTAL_HEIGHT }}>
+                    <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: ZOOMED_HEIGHT }}>
                       {hours.map(h => (
                         <div key={h} className="border-b border-border/50 text-[10px] text-muted-foreground text-right pr-1.5 pt-0.5" style={{ height: HOUR_HEIGHT }}>
                           {h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`}
@@ -1047,9 +1057,8 @@ export default function Schedule() {
                     </div>
 
                     {/* Day columns */}
-                    {DAYS_OF_WEEK.map(day => {
+                    {workingDays.map(day => {
                       const daySchedule = lastSchedule.days.find(d => d.day === day);
-                      const isDayOff = worker.daysOff.includes(day);
 
                       // Time window highlight for dragged client on this day
                       const dragWindow = isDragging && activeDrag
@@ -1060,12 +1069,12 @@ export default function Schedule() {
                         <div
                           key={day}
                           ref={(el) => { if (el) dayColumnRefs.current.set(day, el); }}
-                          className={`flex-1 min-w-[100px] border-r last:border-r-0 relative ${isDayOff ? '' : 'cursor-crosshair'}`}
-                          style={{ height: TOTAL_HEIGHT }}
-                          onClick={(e) => !isDayOff && handleCalendarClick(e, day, MIN_HEIGHT)}
+                          className="flex-1 min-w-[100px] border-r last:border-r-0 relative cursor-crosshair"
+                          style={{ height: ZOOMED_HEIGHT }}
+                          onClick={(e) => handleCalendarClick(e, day, MIN_HEIGHT)}
                         >
                           {/* Day header (sticky) */}
-                          <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
+                          <div className="sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold bg-card">
                             <div className="flex items-center justify-center gap-1">
                               <span>{DAY_LABELS[day]}</span>
                               {daySchedule && daySchedule.visits.length > 0 && (
@@ -1110,24 +1119,24 @@ export default function Schedule() {
 
                           {/* Hour grid lines */}
                           {hours.map(h => (
-                            <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: h * HOUR_HEIGHT, height: HOUR_HEIGHT }} />
+                            <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: (h - startHour) * HOUR_HEIGHT, height: HOUR_HEIGHT }} />
                           ))}
 
                           {/* Working hours background */}
-                          {!isDayOff && (
+                          {(
                             <div className="absolute left-0 right-0 bg-primary/[0.03]"
-                              style={{ top: whStartMin * MIN_HEIGHT, height: (whEndMin - whStartMin) * MIN_HEIGHT }} />
+                              style={{ top: (whStartMin - offsetMin) * MIN_HEIGHT, height: (whEndMin - whStartMin) * MIN_HEIGHT }} />
                           )}
 
                           {/* Break shading */}
-                          {!isDayOff && worker.breaks.map((b, bi) => {
+                          {worker.breaks.map((b, bi) => {
                             const bs = b.startTime.split(':').map(Number);
                             const be = b.endTime.split(':').map(Number);
                             const bStartMin = bs[0] * 60 + bs[1];
                             const bEndMin = be[0] * 60 + be[1];
                             return (
                               <div key={bi} className="absolute left-0 right-0 bg-muted/40 border-y border-dashed border-muted-foreground/20"
-                                style={{ top: bStartMin * MIN_HEIGHT, height: (bEndMin - bStartMin) * MIN_HEIGHT }}>
+                                style={{ top: (bStartMin - offsetMin) * MIN_HEIGHT, height: (bEndMin - bStartMin) * MIN_HEIGHT }}>
                                 <span className="text-[8px] text-muted-foreground px-0.5 truncate block">{b.label}</span>
                               </div>
                             );
@@ -1138,7 +1147,7 @@ export default function Schedule() {
                             <div
                               className="absolute left-0 right-0 bg-green-500/10 border-y-2 border-green-500/40 z-[5] pointer-events-none"
                               style={{
-                                top: timeToMin(dragWindow.startTime) * MIN_HEIGHT,
+                                top: (timeToMin(dragWindow.startTime) - offsetMin) * MIN_HEIGHT,
                                 height: (timeToMin(dragWindow.endTime) - timeToMin(dragWindow.startTime)) * MIN_HEIGHT,
                               }}
                             >
@@ -1159,7 +1168,7 @@ export default function Schedule() {
                                   : 'border-destructive bg-destructive/10'
                               }`}
                               style={{
-                                top: dragPosition.minuteOfDay * MIN_HEIGHT,
+                                top: (dragPosition.minuteOfDay - offsetMin) * MIN_HEIGHT,
                                 height: activeDrag.durationMinutes * MIN_HEIGHT,
                               }}
                             >
@@ -1205,7 +1214,7 @@ export default function Schedule() {
                                         <div
                                           data-event-block
                                           className={`absolute left-0.5 right-0.5 rounded-sm bg-red-500/30 border-2 border-red-500 overflow-hidden cursor-pointer z-[3] ${isBeingDragged ? 'opacity-30' : ''}`}
-                                          style={{ top: travelStart * MIN_HEIGHT, height: Math.max(overlapMinutes * MIN_HEIGHT, 2) }}
+                                          style={{ top: (travelStart - offsetMin) * MIN_HEIGHT, height: Math.max(overlapMinutes * MIN_HEIGHT, 2) }}
                                           onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
                                           title={`⚠️ Travel overlap: ${overlapMinutes} min conflict`}
                                         >
@@ -1218,8 +1227,8 @@ export default function Schedule() {
                                           <div
                                             data-event-block
                                             className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
-                                            style={{
-                                              top: (prevEndMin!) * MIN_HEIGHT,
+                                             style={{
+                                              top: (prevEndMin! - offsetMin) * MIN_HEIGHT,
                                               height: Math.max((v.travelTimeFromPrev - overlapMinutes) * MIN_HEIGHT, 2),
                                             }}
                                             onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
@@ -1235,7 +1244,7 @@ export default function Schedule() {
                                       <div
                                         data-event-block
                                         className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
-                                        style={{ top: travelStart * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
+                                        style={{ top: (travelStart - offsetMin) * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
                                         onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
                                         title={`${v.travelTimeFromPrev} min drive`}
                                       >
@@ -1252,7 +1261,7 @@ export default function Schedule() {
                                   className={`absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden transition-all touch-none ${
                                     isBeingDragged ? 'opacity-30 cursor-grabbing' : 'cursor-grab hover:brightness-110'
                                   }`}
-                                  style={{ top: startMin * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
+                                  style={{ top: (startMin - offsetMin) * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
                                   onClick={(e) => handleEditVisit(e, day, i, v)}
                                   title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)} (drag to move)`}
                                   {...dragHandlers}
@@ -1279,7 +1288,7 @@ export default function Schedule() {
                               <div
                                 data-event-block
                                 className="absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden"
-                                style={{ top: lastEndMin * MIN_HEIGHT, height: Math.max(travelHomeMin * MIN_HEIGHT, 2) }}
+                                style={{ top: (lastEndMin - offsetMin) * MIN_HEIGHT, height: Math.max(travelHomeMin * MIN_HEIGHT, 2) }}
                                 title={`${travelHomeMin} min drive home`}
                               >
                                 {travelHomeMin >= 15 && (
