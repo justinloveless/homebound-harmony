@@ -1068,12 +1068,12 @@ export default function Schedule() {
                         <div
                           key={day}
                           ref={(el) => { if (el) dayColumnRefs.current.set(day, el); }}
-                          className={`flex-1 min-w-[100px] border-r last:border-r-0 relative ${isDayOff ? '' : 'cursor-crosshair'}`}
-                          style={{ height: TOTAL_HEIGHT }}
-                          onClick={(e) => !isDayOff && handleCalendarClick(e, day, MIN_HEIGHT)}
+                          className="flex-1 min-w-[100px] border-r last:border-r-0 relative cursor-crosshair"
+                          style={{ height: ZOOMED_HEIGHT }}
+                          onClick={(e) => handleCalendarClick(e, day, MIN_HEIGHT)}
                         >
                           {/* Day header (sticky) */}
-                          <div className={`sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold ${isDayOff ? 'bg-muted/60 text-muted-foreground' : 'bg-card'}`}>
+                          <div className="sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold bg-card">
                             <div className="flex items-center justify-center gap-1">
                               <span>{DAY_LABELS[day]}</span>
                               {daySchedule && daySchedule.visits.length > 0 && (
