@@ -1122,13 +1122,13 @@ export default function Schedule() {
                           ))}
 
                           {/* Working hours background */}
-                          {!isDayOff && (
+                          {(
                             <div className="absolute left-0 right-0 bg-primary/[0.03]"
                               style={{ top: whStartMin * MIN_HEIGHT, height: (whEndMin - whStartMin) * MIN_HEIGHT }} />
                           )}
 
                           {/* Break shading */}
-                          {!isDayOff && worker.breaks.map((b, bi) => {
+                          {worker.breaks.map((b, bi) => {
                             const bs = b.startTime.split(':').map(Number);
                             const be = b.endTime.split(':').map(Number);
                             const bStartMin = bs[0] * 60 + bs[1];
