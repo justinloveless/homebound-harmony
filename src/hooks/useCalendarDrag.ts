@@ -52,6 +52,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
 
   // Refs to avoid stale closures
   const dragInfoRef = useRef<DragInfo | null>(null);
+  const dragPositionRef = useRef<DragPosition | null>(null);
   const isDraggingRef = useRef(false);
   const startPosRef = useRef<{ x: number; y: number } | null>(null);
   const hasMovedRef = useRef(false);
