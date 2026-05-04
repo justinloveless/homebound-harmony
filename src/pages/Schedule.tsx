@@ -1023,8 +1023,11 @@ export default function Schedule() {
                 <div className="border rounded-lg overflow-hidden bg-card">
                   {/* Legend */}
                   <div className="flex items-center gap-4 px-3 py-2 border-b bg-muted/30 text-[10px] text-muted-foreground">
-                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary/20 border border-primary/30" /> Travel</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-accent/40 border border-accent/60" /> Travel</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary border border-primary" /> Visit</span>
+                    <span className="flex items-center gap-1 text-red-600 font-medium">
+                      <span className="w-3 h-3 rounded bg-red-500/30 border-2 border-red-500" /> Travel overlap
+                    </span>
                     {isDragging && (
                       <span className="flex items-center gap-1 text-green-600 font-medium">
                         <span className="w-3 h-3 rounded bg-green-500/20 border border-green-500/50" /> Available window
