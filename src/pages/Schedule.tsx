@@ -100,14 +100,26 @@ export default function Schedule() {
 
   // ========== Drag-and-drop handler ==========
   const handleDrop = useCallback((result: DropResult) => {
-    if (!lastSchedule) return;
+    console.debug('[calendar-drop] received drop result', result);
+    if (!lastSchedule) {
+      console.debug('[calendar-drop] aborted: no lastSchedule');
+      return;
+    }
     const { day, startMinute, dragInfo } = result;
     const client = clients.find(c => c.id === dragInfo.clientId);
-    if (!client) return;
+    if (!client) {
+      console.debug('[calendar-drop] aborted: client not found', { clientId: dragInfo.clientId });
+      return;
+    }
 
     // Validate: client must have a window on this day
     const tw = client.timeWindows.find(w => w.day === day);
     if (!tw) {
+      console.debug('[calendar-drop] rejected: no client availability on target day', {
+        client: client.name,
+        day,
+        timeWindows: client.timeWindows,
+      });
       toast.error(`${client.name} has no availability on ${DAY_LABELS[day]}`);
       return;
     }
@@ -122,6 +134,14 @@ export default function Schedule() {
     // Round to 15-min
     dropStart = Math.round(dropStart / 15) * 15;
 
+    console.debug('[calendar-drop] calculated drop time', {
+      requestedStart: startMinute,
+      dropStart,
+      duration: dragInfo.durationMinutes,
+      clientWindow: { start: tw.startTime, end: tw.endTime, twStart, twEnd },
+      workerWindow: { start: worker.workingHours.startTime, end: worker.workingHours.endTime, whStart, whEnd },
+    });
+
     // Check breaks
     for (const b of worker.breaks) {
       const bs = timeToMin(b.startTime);
@@ -134,6 +154,7 @@ export default function Schedule() {
 
     const dropEnd = dropStart + dragInfo.durationMinutes;
     if (dropEnd > twEnd || dropEnd > whEnd) {
+      console.debug('[calendar-drop] rejected: not enough room', { dropStart, dropEnd, twEnd, whEnd });
       toast.error(`Not enough room for ${client.name} at that time`);
       return;
     }
@@ -143,7 +164,13 @@ export default function Schedule() {
 
     const sourceDay = updatedDays.find(d => d.day === dragInfo.sourceDay);
     if (sourceDay) {
+      console.debug('[calendar-drop] removing source visit', {
+        sourceDay: dragInfo.sourceDay,
+        sourceIndex: dragInfo.sourceIndex,
+        beforeCount: sourceDay.visits.length,
+      });
       sourceDay.visits = sourceDay.visits.filter((_, i) => i !== dragInfo.sourceIndex);
+      console.debug('[calendar-drop] source visit removed', { afterCount: sourceDay.visits.length });
     }
 
     // 2. Get the target day's visits (after removal if same day)
@@ -177,6 +204,14 @@ export default function Schedule() {
       droppedVisit, existingVisits, day, worker, clients, travelTimes
     );
 
+    console.debug('[calendar-drop] conflicts resolved', {
+      targetDay: day,
+      droppedVisit,
+      existingVisits,
+      resolvedVisits,
+      removedClients,
+    });
+
     targetDay.visits = resolvedVisits;
 
     // 5. Recalculate all affected days
@@ -197,6 +232,11 @@ export default function Schedule() {
     }, 0);
 
     setSchedule({ ...lastSchedule, days: finalDays, totalTravelMinutes: totalTravel, totalTimeAwayMinutes: totalAway });
+    console.debug('[calendar-drop] schedule updated', {
+      finalDays: finalDays.map(d => ({ day: d.day, visits: d.visits })),
+      totalTravel,
+      totalAway,
+    });
 
     if (removedClients.length > 0) {
       const names = removedClients.map(id => clients.find(c => c.id === id)?.name ?? id);
