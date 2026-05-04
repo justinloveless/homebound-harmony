@@ -581,7 +581,7 @@ export default function Schedule() {
 
   /** Open edit popup for an existing visit */
   const handleEditVisit = (e: React.MouseEvent, day: DayOfWeek, visitIndex: number, visit: ScheduledVisit) => {
-    if (isDragging) return;
+    if (isDragging || justFinishedDragRef.current) return;
     e.stopPropagation();
     const startMin = visit.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
     const endMin = visit.endTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
