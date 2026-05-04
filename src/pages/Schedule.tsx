@@ -1266,11 +1266,9 @@ export default function Schedule() {
                                   title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)} (drag to move)`}
                                   {...dragHandlers}
                                 >
-                                  <div className="px-1 py-0.5">
-                                    <p className="text-[10px] font-medium truncate">{client?.name}</p>
-                                    {visitDuration >= 20 && (
-                                      <p className="text-[8px] opacity-80">{formatTime(v.startTime)}</p>
-                                    )}
+                                  <div className="px-1 py-0.5 flex items-center justify-between gap-1">
+                                    <span className="text-[9px] opacity-80 shrink-0">{formatTime(v.startTime)}</span>
+                                    <span className="text-[10px] font-medium truncate text-right">{client?.name}</span>
                                   </div>
                                 </div>
                               </React.Fragment>
