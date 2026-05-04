@@ -1560,7 +1560,7 @@ export default function Schedule() {
                 const visitCount = dayData?.visits.length ?? 0;
                 return (
                   <Button key={day} variant={selectedDay === day ? 'default' : 'outline'} size="sm"
-                    onClick={() => setSelectedDay(day)}>
+                    onClick={() => { setSelectedDay(day); setHoveredVisitIndex(null); }}>
                     {DAY_LABELS[day]} {visitCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{visitCount}</Badge>}
                   </Button>
                 );
