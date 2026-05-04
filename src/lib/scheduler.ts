@@ -787,6 +787,7 @@ export function recalcDaySchedule(
   worker: WorkerProfile,
   clients: Client[],
   travelTimes: TravelTimeMatrix,
+  preserveManualTimes?: boolean,
 ): DaySchedule | null {
   const workStart = timeToMinutes(worker.workingHours.startTime);
   const workEnd = timeToMinutes(worker.workingHours.endTime);
@@ -806,7 +807,14 @@ export function recalcDaySchedule(
     const earliest = Math.max(currentTime + travel, windowStart);
 
     const manualStart = v.startTime !== '00:00' ? timeToMinutes(v.startTime) : 0;
-    let arrival = manualStart > earliest ? manualStart : earliest;
+
+    let arrival: number;
+    if (preserveManualTimes && manualStart > 0) {
+      // Respect the manually set time even if travel overlaps
+      arrival = manualStart;
+    } else {
+      arrival = manualStart > earliest ? manualStart : earliest;
+    }
     arrival = roundUpToBlock(arrival);
     arrival = adjustForBreaks(arrival, client.visitDurationMinutes, worker);
 
