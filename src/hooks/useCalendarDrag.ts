@@ -57,6 +57,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
   const hasMovedRef = useRef(false);
 
   const DRAG_THRESHOLD = 8; // px before drag starts
+  const justFinishedDragRef = useRef(false);
 
   const getDayAndMinute = useCallback((clientX: number, clientY: number): DragPosition | null => {
     const columns = dayColumnRefs.current;
@@ -65,8 +66,9 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     for (const [day, el] of columns.entries()) {
       const rect = el.getBoundingClientRect();
       if (clientX >= rect.left && clientX <= rect.right) {
-        const scrollTop = scrollContainerRef.current?.scrollTop ?? 0;
-        const yInColumn = clientY - rect.top + scrollTop;
+        // rect.top already accounts for scroll position since the column
+        // is a child of the scroll container with full height
+        const yInColumn = clientY - rect.top;
         const rawMinutes = yInColumn / minHeight;
         const snapped = Math.round(rawMinutes / 15) * 15;
         const clamped = Math.max(0, Math.min(snapped, 24 * 60 - 15));
@@ -109,7 +111,9 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
   }, [getDayAndMinute]);
 
   const handlePointerUp = useCallback(() => {
-    if (isDraggingRef.current && dragInfoRef.current) {
+    const wasDragging = isDraggingRef.current && hasMovedRef.current;
+
+    if (wasDragging && dragInfoRef.current) {
       // Get final position
       const pos = dragPosition;
       if (pos) {
@@ -119,6 +123,12 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
           dragInfo: dragInfoRef.current,
         });
       }
+    }
+
+    // If we actually dragged, suppress the upcoming click event
+    if (wasDragging) {
+      justFinishedDragRef.current = true;
+      setTimeout(() => { justFinishedDragRef.current = false; }, 50);
     }
 
     // Reset
@@ -285,6 +295,7 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
     dragClientWindows,
     isValidDropPosition,
     createDragHandlers,
+    justFinishedDragRef,
   };
 }
 

@@ -215,6 +215,7 @@ export default function Schedule() {
     dragClientWindows,
     isValidDropPosition,
     createDragHandlers,
+    justFinishedDragRef,
   } = useCalendarDrag({
     scrollContainerRef: calendarScrollRef,
     dayColumnRefs,
@@ -554,7 +555,7 @@ export default function Schedule() {
 
   /** Handle clicking on the weekly calendar to add a new event */
   const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, pixPerMin: number) => {
-    if (isDragging) return;
+    if (isDragging || justFinishedDragRef.current) return;
     const target = e.target as HTMLElement;
     if (target.closest('[data-event-block]')) return;
 
@@ -580,7 +581,7 @@ export default function Schedule() {
 
   /** Open edit popup for an existing visit */
   const handleEditVisit = (e: React.MouseEvent, day: DayOfWeek, visitIndex: number, visit: ScheduledVisit) => {
-    if (isDragging) return;
+    if (isDragging || justFinishedDragRef.current) return;
     e.stopPropagation();
     const startMin = visit.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
     const endMin = visit.endTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
