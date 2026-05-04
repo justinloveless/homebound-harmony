@@ -215,6 +215,7 @@ export default function Schedule() {
     dragClientWindows,
     isValidDropPosition,
     createDragHandlers,
+    justFinishedDragRef,
   } = useCalendarDrag({
     scrollContainerRef: calendarScrollRef,
     dayColumnRefs,
