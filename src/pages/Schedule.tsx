@@ -1173,6 +1173,12 @@ export default function Schedule() {
                             const visitDuration = endMin - startMin;
                             const travelStart = startMin - v.travelTimeFromPrev;
 
+                            // Detect travel overlap: does this travel block overlap with the previous visit's end?
+                            const prevVisit = i > 0 ? daySchedule.visits[i - 1] : null;
+                            const prevEndMin = prevVisit ? prevVisit.endTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m) : null;
+                            const hasTravelOverlap = prevEndMin !== null && v.travelTimeFromPrev > 0 && travelStart < prevEndMin;
+                            const overlapMinutes = hasTravelOverlap && prevEndMin !== null ? prevEndMin - travelStart : 0;
+
                             // Is this the visit currently being dragged?
                             const isBeingDragged = isDragging && activeDrag &&
                               activeDrag.sourceDay === day && activeDrag.sourceIndex === i;
@@ -1188,17 +1194,53 @@ export default function Schedule() {
                               <React.Fragment key={i}>
                                 {/* Travel block */}
                                 {v.travelTimeFromPrev > 0 && (
-                                  <div
-                                    data-event-block
-                                    className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
-                                    style={{ top: travelStart * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
-                                    onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
-                                    title={`${v.travelTimeFromPrev} min drive`}
-                                  >
-                                    {v.travelTimeFromPrev >= 15 && (
-                                      <span className="text-[8px] text-accent-foreground/70 px-1 truncate block">{v.travelTimeFromPrev}m</span>
+                                  <>
+                                    {hasTravelOverlap ? (
+                                      <>
+                                        {/* Overlap portion - shown in red */}
+                                        <div
+                                          data-event-block
+                                          className={`absolute left-0.5 right-0.5 rounded-sm bg-red-500/30 border-2 border-red-500 overflow-hidden cursor-pointer z-[3] ${isBeingDragged ? 'opacity-30' : ''}`}
+                                          style={{ top: travelStart * MIN_HEIGHT, height: Math.max(overlapMinutes * MIN_HEIGHT, 2) }}
+                                          onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
+                                          title={`⚠️ Travel overlap: ${overlapMinutes} min conflict`}
+                                        >
+                                          <span className="text-[8px] text-red-600 dark:text-red-400 font-bold px-1 truncate block">
+                                            ⚠️ {overlapMinutes}m overlap
+                                          </span>
+                                        </div>
+                                        {/* Non-overlap portion - normal travel color */}
+                                        {v.travelTimeFromPrev - overlapMinutes > 0 && (
+                                          <div
+                                            data-event-block
+                                            className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
+                                            style={{
+                                              top: (prevEndMin!) * MIN_HEIGHT,
+                                              height: Math.max((v.travelTimeFromPrev - overlapMinutes) * MIN_HEIGHT, 2),
+                                            }}
+                                            onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
+                                            title={`${v.travelTimeFromPrev - overlapMinutes} min drive`}
+                                          >
+                                            {(v.travelTimeFromPrev - overlapMinutes) >= 15 && (
+                                              <span className="text-[8px] text-accent-foreground/70 px-1 truncate block">{v.travelTimeFromPrev - overlapMinutes}m</span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <div
+                                        data-event-block
+                                        className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
+                                        style={{ top: travelStart * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
+                                        onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
+                                        title={`${v.travelTimeFromPrev} min drive`}
+                                      >
+                                        {v.travelTimeFromPrev >= 15 && (
+                                          <span className="text-[8px] text-accent-foreground/70 px-1 truncate block">{v.travelTimeFromPrev}m</span>
+                                        )}
+                                      </div>
                                     )}
-                                  </div>
+                                  </>
                                 )}
                                 {/* Visit block */}
                                 <div
