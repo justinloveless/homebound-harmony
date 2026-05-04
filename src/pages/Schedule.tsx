@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
 import { getTimeDependentTravelTimes } from '@/lib/google-maps';
+import { useCalendarDrag, type DropResult } from '@/hooks/useCalendarDrag';
 
 /** Popup state for adding/editing an event on the weekly calendar */
 interface EventPopup {
@@ -37,6 +38,15 @@ function getMonday(): string {
   return new Date(d.setDate(diff)).toISOString().split('T')[0];
 }
 
+function timeToMin(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minToTime(m: number): string {
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
 export default function Schedule() {
   const { workspace, setSchedule, saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule, updateClient } = useWorkspace();
   const { worker, clients, travelTimes, lastSchedule } = workspace;
@@ -52,6 +62,9 @@ export default function Schedule() {
   const [renameValue, setRenameValue] = useState('');
   const [eventPopup, setEventPopup] = useState<EventPopup | null>(null);
   const [copyMenuDay, setCopyMenuDay] = useState<DayOfWeek | null>(null);
+  const [droppedClients, setDroppedClients] = useState<string[]>([]);
+  const dayColumnRefs = useRef<Map<DayOfWeek, HTMLDivElement>>(new Map());
+
   const { scheduledClients, unscheduledClients } = useMemo(() => {
     if (!lastSchedule) return { scheduledClients: [] as typeof clients, unscheduledClients: [] as typeof clients };
     const scheduledIds = new Set(
@@ -74,12 +87,143 @@ export default function Schedule() {
 
   useEffect(() => {
     if (lastSchedule) {
-      // Small delay to let the DOM render
       setTimeout(scrollToWorkHours, 100);
     }
   }, [lastSchedule, scrollToWorkHours]);
 
   const canGenerate = worker.name && worker.homeAddress && clients.length > 0;
+
+  // ========== Calendar constants (shared between render and drag) ==========
+  const HOUR_HEIGHT = 48;
+  const TOTAL_HEIGHT = 24 * HOUR_HEIGHT;
+  const MIN_HEIGHT = TOTAL_HEIGHT / (24 * 60);
+
+  // ========== Drag-and-drop handler ==========
+  const handleDrop = useCallback((result: DropResult) => {
+    if (!lastSchedule) return;
+    const { day, startMinute, dragInfo } = result;
+    const client = clients.find(c => c.id === dragInfo.clientId);
+    if (!client) return;
+
+    // Validate: client must have a window on this day
+    const tw = client.timeWindows.find(w => w.day === day);
+    if (!tw) {
+      toast.error(`${client.name} has no availability on ${DAY_LABELS[day]}`);
+      return;
+    }
+
+    const twStart = timeToMin(tw.startTime);
+    const twEnd = timeToMin(tw.endTime);
+    const whStart = timeToMin(worker.workingHours.startTime);
+    const whEnd = timeToMin(worker.workingHours.endTime);
+
+    // Clamp start to valid range
+    let dropStart = Math.max(startMinute, twStart, whStart);
+    // Round to 15-min
+    dropStart = Math.round(dropStart / 15) * 15;
+
+    // Check breaks
+    for (const b of worker.breaks) {
+      const bs = timeToMin(b.startTime);
+      const be = timeToMin(b.endTime);
+      if (dropStart < be && dropStart + dragInfo.durationMinutes > bs) {
+        dropStart = be;
+        dropStart = Math.ceil(dropStart / 15) * 15;
+      }
+    }
+
+    const dropEnd = dropStart + dragInfo.durationMinutes;
+    if (dropEnd > twEnd || dropEnd > whEnd) {
+      toast.error(`Not enough room for ${client.name} at that time`);
+      return;
+    }
+
+    // 1. Remove the dragged visit from its source day
+    let updatedDays = lastSchedule.days.map(d => ({ ...d, visits: [...d.visits] }));
+
+    const sourceDay = updatedDays.find(d => d.day === dragInfo.sourceDay);
+    if (sourceDay) {
+      sourceDay.visits = sourceDay.visits.filter((_, i) => i !== dragInfo.sourceIndex);
+    }
+
+    // 2. Get the target day's visits (after removal if same day)
+    let targetDay = updatedDays.find(d => d.day === day);
+    if (!targetDay) {
+      const dayIndex = DAYS_OF_WEEK.indexOf(day);
+      const dateObj = new Date(lastSchedule.weekStartDate);
+      dateObj.setDate(dateObj.getDate() + dayIndex);
+      targetDay = {
+        day,
+        date: dateObj.toISOString().split('T')[0],
+        visits: [],
+        totalTravelMinutes: 0,
+        leaveHomeTime: worker.workingHours.startTime,
+        arriveHomeTime: worker.workingHours.startTime,
+      };
+      updatedDays.push(targetDay);
+    }
+
+    // 3. Create the dragged visit
+    const droppedVisit: ScheduledVisit = {
+      clientId: client.id,
+      startTime: minToTime(dropStart),
+      endTime: minToTime(dropEnd),
+      travelTimeFromPrev: 0,
+    };
+
+    // 4. Insert and resolve conflicts by bumping
+    const existingVisits = targetDay.visits.filter(v => v.clientId !== client.id);
+    const { resolvedVisits, removedClients } = resolveConflicts(
+      droppedVisit, existingVisits, day, worker, clients, travelTimes
+    );
+
+    targetDay.visits = resolvedVisits;
+
+    // 5. Recalculate all affected days
+    const finalDays: DaySchedule[] = [];
+    for (const d of updatedDays) {
+      if (d.visits.length === 0) continue;
+      const recalced = recalcDaySchedule(d.visits, d.day, d.date, worker, clients, travelTimes);
+      if (recalced) finalDays.push(recalced);
+    }
+
+    finalDays.sort((a, b) => DAYS_OF_WEEK.indexOf(a.day) - DAYS_OF_WEEK.indexOf(b.day));
+
+    const totalTravel = finalDays.reduce((s, d) => s + d.totalTravelMinutes, 0);
+    const totalAway = finalDays.reduce((s, d) => {
+      const leave = d.leaveHomeTime.split(':').map(Number);
+      const arrive = d.arriveHomeTime.split(':').map(Number);
+      return s + ((arrive[0] * 60 + arrive[1]) - (leave[0] * 60 + leave[1]));
+    }, 0);
+
+    setSchedule({ ...lastSchedule, days: finalDays, totalTravelMinutes: totalTravel, totalTimeAwayMinutes: totalAway });
+
+    if (removedClients.length > 0) {
+      const names = removedClients.map(id => clients.find(c => c.id === id)?.name ?? id);
+      setDroppedClients(removedClients);
+      toast.warning(`${names.join(', ')} couldn't fit and ${names.length === 1 ? 'was' : 'were'} removed from the schedule`);
+    } else {
+      toast.success(`${client.name} moved to ${DAY_LABELS[day]} at ${formatTime(minToTime(dropStart))}`);
+    }
+  }, [lastSchedule, clients, worker, travelTimes, setSchedule]);
+
+  const {
+    isDragging,
+    dragInfo: activeDrag,
+    dragPosition,
+    ghostPos,
+    dragClientWindows,
+    isValidDropPosition,
+    createDragHandlers,
+  } = useCalendarDrag({
+    scrollContainerRef: calendarScrollRef,
+    dayColumnRefs,
+    minHeight: MIN_HEIGHT,
+    worker,
+    clients,
+    schedule: lastSchedule,
+    onDrop: handleDrop,
+  });
 
   /** Refine a schedule's travel times using Google Maps with departure times */
   const refineWithGoogle = async (schedule: WeekSchedule) => {
@@ -91,15 +235,13 @@ export default function Schedule() {
         const day = refinedDays[di];
         setRefineProgress(`Refining ${DAY_LABELS[day.day]} (${di + 1}/${refinedDays.length})...`);
 
-        // Build ordered address list: home → clients → home
         const addresses: string[] = [worker.homeAddress];
         const visitClients = day.visits.map(v => clients.find(c => c.id === v.clientId)).filter(Boolean);
         for (const c of visitClients) {
           if (c) addresses.push(c.address);
         }
-        addresses.push(worker.homeAddress); // return home
+        addresses.push(worker.homeAddress);
 
-        // Build departure time from schedule date + leave time
         const departureDate = new Date(`${day.date}T${day.leaveHomeTime}:00`);
 
         const { durationInTraffic, distanceMiles } = await getTimeDependentTravelTimes(
@@ -108,7 +250,6 @@ export default function Schedule() {
           (msg) => setRefineProgress(`${DAY_LABELS[day.day]}: ${msg}`),
         );
 
-        // Rebuild the day schedule with refined travel times
         const workStart = worker.workingHours.startTime.split(':').map(Number);
         const workStartMin = workStart[0] * 60 + workStart[1];
         let currentTime = workStartMin;
@@ -126,9 +267,8 @@ export default function Schedule() {
           })();
 
           let arrival = Math.max(currentTime + travelMin, windowStart);
-          arrival = Math.ceil(arrival / 15) * 15; // Round to 15-min block
+          arrival = Math.ceil(arrival / 15) * 15;
 
-          // Skip over breaks
           for (const b of worker.breaks) {
             const bs = b.startTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
             const be = b.endTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
@@ -139,12 +279,10 @@ export default function Schedule() {
           }
 
           const endMin = arrival + client.visitDurationMinutes;
-          const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-
           refinedVisits.push({
             clientId: visit.clientId,
-            startTime: toTime(arrival),
-            endTime: toTime(endMin),
+            startTime: minToTime(arrival),
+            endTime: minToTime(endMin),
             travelTimeFromPrev: travelMin,
             travelDistanceMiFromPrev: distanceMiles[i] ?? undefined,
           });
@@ -152,13 +290,11 @@ export default function Schedule() {
           currentTime = endMin;
         }
 
-        // Travel home (last leg)
         const travelHome = durationInTraffic[day.visits.length] ?? (() => {
           const lastId = day.visits[day.visits.length - 1]?.clientId ?? 'home';
           return travelTimes[`${['home', lastId].sort().join('|')}`] ?? 15;
         })();
 
-        const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
         const totalTravel = refinedVisits.reduce((s, v) => s + v.travelTimeFromPrev, 0) + travelHome;
 
         refinedDays[di] = {
@@ -166,9 +302,9 @@ export default function Schedule() {
           visits: refinedVisits,
           totalTravelMinutes: totalTravel,
           leaveHomeTime: refinedVisits.length > 0
-            ? toTime(refinedVisits[0].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) - refinedVisits[0].travelTimeFromPrev)
+            ? minToTime(refinedVisits[0].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) - refinedVisits[0].travelTimeFromPrev)
             : day.leaveHomeTime,
-          arriveHomeTime: toTime(currentTime + travelHome),
+          arriveHomeTime: minToTime(currentTime + travelHome),
         };
       }
 
@@ -228,7 +364,6 @@ export default function Schedule() {
   const selectedDaySchedule = lastSchedule?.days.find(d => d.day === selectedDay);
 
   // --- Manual editing helpers ---
-  /** Refine a single day's travel times via Google Maps */
   const refineSingleDay = async (daySchedule: DaySchedule) => {
     if (daySchedule.visits.length === 0) return daySchedule;
 
@@ -260,10 +395,9 @@ export default function Schedule() {
         })();
 
         const earliest = Math.max(currentTime + travelMin, windowStart);
-        // Respect manually-set start times
         const manualStart = visit.startTime !== '00:00' ? visit.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) : 0;
         let arrival = manualStart > earliest ? manualStart : earliest;
-        arrival = Math.ceil(arrival / 15) * 15; // Round to 15-min block
+        arrival = Math.ceil(arrival / 15) * 15;
         for (const b of worker.breaks) {
           const bs = b.startTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
           const be = b.endTime.split(':').map(Number).reduce((h: number, m: number) => h * 60 + m);
@@ -274,11 +408,10 @@ export default function Schedule() {
         }
 
         const endMin = arrival + client.visitDurationMinutes;
-        const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
         refinedVisits.push({
           clientId: visit.clientId,
-          startTime: toTime(arrival),
-          endTime: toTime(endMin),
+          startTime: minToTime(arrival),
+          endTime: minToTime(endMin),
           travelTimeFromPrev: travelMin,
           travelDistanceMiFromPrev: distanceMiles[i] ?? undefined,
         });
@@ -286,7 +419,6 @@ export default function Schedule() {
       }
 
       const travelHome = durationInTraffic[daySchedule.visits.length] ?? 15;
-      const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
       const totalTravel = refinedVisits.reduce((s, v) => s + v.travelTimeFromPrev, 0) + travelHome;
 
       return {
@@ -294,9 +426,9 @@ export default function Schedule() {
         visits: refinedVisits,
         totalTravelMinutes: totalTravel,
         leaveHomeTime: refinedVisits.length > 0
-          ? toTime(refinedVisits[0].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) - refinedVisits[0].travelTimeFromPrev)
+          ? minToTime(refinedVisits[0].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m) - refinedVisits[0].travelTimeFromPrev)
           : daySchedule.leaveHomeTime,
-        arriveHomeTime: toTime(currentTime + travelHome),
+        arriveHomeTime: minToTime(currentTime + travelHome),
       };
     } catch (err) {
       console.error('Single day refine failed:', err);
@@ -308,7 +440,6 @@ export default function Schedule() {
     if (!lastSchedule) return;
     let newDays: DaySchedule[];
     if (updatedDay) {
-      // Refine this day via Google Maps
       const refined = await refineSingleDay(updatedDay);
       const exists = lastSchedule.days.some(d => d.day === originalDay);
       if (exists) {
@@ -380,7 +511,6 @@ export default function Schedule() {
     toast.success(`${client.name} added to ${DAY_LABELS[day]}`);
   };
 
-  /** Copy all visits from one day to another */
   const copyDayTo = (fromDay: DayOfWeek, toDay: DayOfWeek) => {
     if (!lastSchedule) return;
     const fromSchedule = lastSchedule.days.find(d => d.day === fromDay);
@@ -418,21 +548,19 @@ export default function Schedule() {
     if (!eventPopup || !lastSchedule) return clients;
     const daySchedule = lastSchedule.days.find(d => d.day === eventPopup.day);
     const onDay = new Set(daySchedule?.visits.map(v => v.clientId) ?? []);
-    // In edit mode, include the current client as available
     const editingClientId = eventPopup.mode === 'edit' ? eventPopup.clientId : null;
     return clients.filter(c => !onDay.has(c.id) || c.id === editingClientId);
   }, [eventPopup?.day, eventPopup?.mode, eventPopup?.clientId, lastSchedule, clients]);
 
   /** Handle clicking on the weekly calendar to add a new event */
-  const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, minHeight: number) => {
-    // Don't open popup if clicking on an existing event
+  const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, pixPerMin: number) => {
+    if (isDragging) return;
     const target = e.target as HTMLElement;
     if (target.closest('[data-event-block]')) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const yOffset = e.clientY - rect.top + (calendarScrollRef.current?.scrollTop ?? 0);
-    const totalMinutes = yOffset / minHeight;
-    // Round to nearest 15-min block
+    const totalMinutes = yOffset / pixPerMin;
     const roundedMinutes = Math.round(totalMinutes / 15) * 15;
     const clampedMinutes = Math.max(0, Math.min(roundedMinutes, 24 * 60 - 15));
     const hours = Math.floor(clampedMinutes / 60);
@@ -452,8 +580,8 @@ export default function Schedule() {
 
   /** Open edit popup for an existing visit */
   const handleEditVisit = (e: React.MouseEvent, day: DayOfWeek, visitIndex: number, visit: ScheduledVisit) => {
+    if (isDragging) return;
     e.stopPropagation();
-    const client = clients.find(c => c.id === visit.clientId);
     const startMin = visit.startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
     const endMin = visit.endTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
     setEventPopup({
@@ -478,22 +606,19 @@ export default function Schedule() {
     const [sh, sm] = eventPopup.startTime.split(':').map(Number);
     const startMin = sh * 60 + sm;
     const endMin = startMin + eventPopup.duration;
-    const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
     const newVisit: ScheduledVisit = {
       clientId: eventPopup.clientId,
-      startTime: toTime(startMin),
-      endTime: toTime(endMin),
+      startTime: minToTime(startMin),
+      endTime: minToTime(endMin),
       travelTimeFromPrev: 0,
     };
 
-    // If editing, first remove the old visit from its original day
     if (eventPopup.mode === 'edit' && eventPopup.originalDay != null && eventPopup.originalIndex != null) {
       const origDaySchedule = lastSchedule.days.find(d => d.day === eventPopup.originalDay);
       if (origDaySchedule) {
         const remainingVisits = origDaySchedule.visits.filter((_, idx) => idx !== eventPopup.originalIndex);
         if (eventPopup.originalDay === eventPopup.day) {
-          // Same day: remove old, insert new at correct position
           let insertIdx = remainingVisits.length;
           for (let i = 0; i < remainingVisits.length; i++) {
             const vStart = remainingVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
@@ -507,9 +632,7 @@ export default function Schedule() {
           setEventPopup(null);
           return;
         } else {
-          // Different day: remove from original day first
           if (remainingVisits.length === 0) {
-            // Remove the day entirely — update inline
             const newDays = lastSchedule.days.filter(d => d.day !== eventPopup.originalDay);
             const totalTravel = newDays.reduce((s, d) => s + d.totalTravelMinutes, 0);
             const totalAway = newDays.reduce((s, d) => {
@@ -526,14 +649,9 @@ export default function Schedule() {
       }
     }
 
-    // Add to target day
-    // Re-read schedule state after potential removal above (use setTimeout to let state settle)
-    // For simplicity, we add directly to the current schedule
     const targetDay = lastSchedule.days.find(d => d.day === eventPopup.day);
     const targetVisits = targetDay ? [...targetDay.visits] : [];
 
-    // For edit mode moving to different day, the removal happened above but state hasn't updated yet.
-    // We work off the current visits and add.
     let insertIdx = targetVisits.length;
     for (let i = 0; i < targetVisits.length; i++) {
       const vStart = targetVisits[i].startTime.split(':').map(Number).reduce((h, m) => h * 60 + m);
@@ -554,7 +672,6 @@ export default function Schedule() {
     setEventPopup(null);
   };
 
-  /** Delete visit from the edit popup */
   const handleDeleteFromPopup = () => {
     if (!eventPopup || eventPopup.mode !== 'edit' || !lastSchedule || eventPopup.originalDay == null || eventPopup.originalIndex == null) return;
     const daySchedule = lastSchedule.days.find(d => d.day === eventPopup.originalDay);
@@ -728,7 +845,6 @@ export default function Schedule() {
                   </div>
                 </div>
               </div>
-              {/* Diff summary */}
               <div className="mt-3 pt-3 border-t text-xs">
                 {(() => {
                   const travelDiff = current.totalTravelMinutes - saved.totalTravelMinutes;
@@ -772,32 +888,25 @@ export default function Schedule() {
             <div className="text-xs space-y-0.5">
               {lastSchedule.unmetVisits.map(u => {
                 const c = clients.find(cl => cl.id === u.clientId);
-                if (!c) return null;
                 return (
                   <div key={u.clientId} className="flex items-center justify-between">
-                    <span className="truncate">{c.name}</span>
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {u.missing} missing
-                    </Badge>
+                    <span>{c?.name ?? u.clientId}</span>
+                    <Badge variant="outline" className="text-[10px]">{u.missing} visit{u.missing > 1 ? 's' : ''} missing</Badge>
                   </div>
                 );
               })}
             </div>
             {lastSchedule.recommendedDrops && lastSchedule.recommendedDrops.length > 0 && (
-              <div className="pt-2 border-t border-destructive/20 space-y-2">
-                <p className="text-xs font-medium">
-                  Recommended to drop ({lastSchedule.recommendedDrops.length}):
-                </p>
+              <div className="pt-2 border-t space-y-2">
+                <p className="text-xs font-medium">Recommended to exclude:</p>
                 <div className="text-xs space-y-0.5">
                   {lastSchedule.recommendedDrops.map(id => {
                     const c = clients.find(cl => cl.id === id);
-                    if (!c) return null;
                     return (
-                      <div key={id} className="flex items-center gap-2">
-                        <span className="text-muted-foreground">•</span>
-                        <span className="truncate">{c.name}</span>
-                        <Badge variant="outline" className="text-[10px] shrink-0 ml-auto">
-                          {c.priority}
+                      <div key={id} className="flex items-center justify-between">
+                        <span>{c?.name ?? id}</span>
+                        <Badge variant="outline" className="text-[10px]">
+                          {c?.priority}
                         </Badge>
                       </div>
                     );
@@ -824,6 +933,34 @@ export default function Schedule() {
         </Card>
       )}
 
+      {/* Dropped clients warning (from drag-and-drop) */}
+      {droppedClients.length > 0 && (
+        <Card className="border-destructive bg-destructive/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2 text-destructive">
+              <AlertCircle className="w-4 h-4" />
+              {droppedClients.length} client{droppedClients.length === 1 ? '' : 's'} removed due to scheduling conflict
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="text-xs space-y-0.5">
+              {droppedClients.map(id => {
+                const c = clients.find(cl => cl.id === id);
+                return (
+                  <div key={id} className="flex items-center justify-between">
+                    <span>{c?.name ?? id}</span>
+                    <Badge variant="outline" className="text-[10px]">{c?.visitDurationMinutes}min</Badge>
+                  </div>
+                );
+              })}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setDroppedClients([])}>
+              <X className="w-3 h-3 mr-1" /> Dismiss
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       {lastSchedule && (
         <Tabs defaultValue="weekly">
           <TabsList>
@@ -833,11 +970,13 @@ export default function Schedule() {
 
           <TabsContent value="weekly" className="space-y-4 mt-4">
             {(() => {
-              // Timeline calendar: 24h vertical axis, 7 day columns
-              const HOUR_HEIGHT = 48; // px per hour
-              const TOTAL_HEIGHT = 24 * HOUR_HEIGHT;
-              const MIN_HEIGHT = TOTAL_HEIGHT / (24 * 60); // px per minute
               const hours = Array.from({ length: 24 }, (_, i) => i);
+
+              // Working hours
+              const whStart = worker.workingHours.startTime.split(':').map(Number);
+              const whEnd = worker.workingHours.endTime.split(':').map(Number);
+              const whStartMin = whStart[0] * 60 + whStart[1];
+              const whEndMin = whEnd[0] * 60 + whEnd[1];
 
               return (
                 <div className="border rounded-lg overflow-hidden bg-card">
@@ -845,9 +984,14 @@ export default function Schedule() {
                   <div className="flex items-center gap-4 px-3 py-2 border-b bg-muted/30 text-[10px] text-muted-foreground">
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary/20 border border-primary/30" /> Travel</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary border border-primary" /> Visit</span>
+                    {isDragging && (
+                      <span className="flex items-center gap-1 text-green-600 font-medium">
+                        <span className="w-3 h-3 rounded bg-green-500/20 border border-green-500/50" /> Available window
+                      </span>
+                    )}
                   </div>
-                  <div ref={calendarScrollRef} className="flex overflow-x-auto overflow-y-auto max-h-[600px]"
-                    style={{ scrollBehavior: 'smooth' }}>
+                  <div ref={calendarScrollRef} className={`flex overflow-x-auto overflow-y-auto max-h-[600px] ${isDragging ? 'select-none' : ''}`}
+                    style={{ scrollBehavior: isDragging ? 'auto' : 'smooth' }}>
                     {/* Time labels column */}
                     <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: TOTAL_HEIGHT }}>
                       {hours.map(h => (
@@ -862,14 +1006,17 @@ export default function Schedule() {
                       const daySchedule = lastSchedule.days.find(d => d.day === day);
                       const isDayOff = worker.daysOff.includes(day);
 
-                      // Working hours background
-                      const whStart = worker.workingHours.startTime.split(':').map(Number);
-                      const whEnd = worker.workingHours.endTime.split(':').map(Number);
-                      const whStartMin = whStart[0] * 60 + whStart[1];
-                      const whEndMin = whEnd[0] * 60 + whEnd[1];
+                      // Time window highlight for dragged client on this day
+                      const dragWindow = isDragging && activeDrag
+                        ? dragClientWindows.find(w => w.day === day)
+                        : null;
 
                       return (
-                        <div key={day} className={`flex-1 min-w-[100px] border-r last:border-r-0 relative ${isDayOff ? '' : 'cursor-crosshair'}`} style={{ height: TOTAL_HEIGHT }}
+                        <div
+                          key={day}
+                          ref={(el) => { if (el) dayColumnRefs.current.set(day, el); }}
+                          className={`flex-1 min-w-[100px] border-r last:border-r-0 relative ${isDayOff ? '' : 'cursor-crosshair'}`}
+                          style={{ height: TOTAL_HEIGHT }}
                           onClick={(e) => !isDayOff && handleCalendarClick(e, day, MIN_HEIGHT)}
                         >
                           {/* Day header (sticky) */}
@@ -941,6 +1088,42 @@ export default function Schedule() {
                             );
                           })}
 
+                          {/* Drag: time window highlight */}
+                          {dragWindow && (
+                            <div
+                              className="absolute left-0 right-0 bg-green-500/10 border-y-2 border-green-500/40 z-[5] pointer-events-none"
+                              style={{
+                                top: timeToMin(dragWindow.startTime) * MIN_HEIGHT,
+                                height: (timeToMin(dragWindow.endTime) - timeToMin(dragWindow.startTime)) * MIN_HEIGHT,
+                              }}
+                            >
+                              <div className="px-1 py-0.5">
+                                <span className="text-[9px] font-medium text-green-700 dark:text-green-400">
+                                  {formatTime(dragWindow.startTime)} – {formatTime(dragWindow.endTime)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Drag: drop position indicator */}
+                          {isDragging && activeDrag && dragPosition?.day === day && (
+                            <div
+                              className={`absolute left-0.5 right-0.5 rounded-sm border-2 border-dashed z-[6] pointer-events-none ${
+                                isValidDropPosition
+                                  ? 'border-green-500 bg-green-500/10'
+                                  : 'border-destructive bg-destructive/10'
+                              }`}
+                              style={{
+                                top: dragPosition.minuteOfDay * MIN_HEIGHT,
+                                height: activeDrag.durationMinutes * MIN_HEIGHT,
+                              }}
+                            >
+                              <span className={`text-[9px] font-medium px-1 ${isValidDropPosition ? 'text-green-700 dark:text-green-400' : 'text-destructive'}`}>
+                                {formatTime(minToTime(dragPosition.minuteOfDay))}
+                              </span>
+                            </div>
+                          )}
+
                           {/* Visits + travel blocks */}
                           {daySchedule?.visits.map((v, i) => {
                             const client = clients.find(c => c.id === v.clientId);
@@ -949,13 +1132,24 @@ export default function Schedule() {
                             const visitDuration = endMin - startMin;
                             const travelStart = startMin - v.travelTimeFromPrev;
 
+                            // Is this the visit currently being dragged?
+                            const isBeingDragged = isDragging && activeDrag &&
+                              activeDrag.sourceDay === day && activeDrag.sourceIndex === i;
+
+                            const dragHandlers = createDragHandlers({
+                              clientId: v.clientId,
+                              sourceDay: day,
+                              sourceIndex: i,
+                              durationMinutes: visitDuration,
+                            });
+
                             return (
                               <React.Fragment key={i}>
                                 {/* Travel block */}
                                 {v.travelTimeFromPrev > 0 && (
                                   <div
                                     data-event-block
-                                    className="absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer"
+                                    className={`absolute left-0.5 right-0.5 rounded-sm bg-accent/40 border border-accent/60 overflow-hidden cursor-pointer ${isBeingDragged ? 'opacity-30' : ''}`}
                                     style={{ top: travelStart * MIN_HEIGHT, height: Math.max(v.travelTimeFromPrev * MIN_HEIGHT, 2) }}
                                     onClick={(e) => { e.stopPropagation(); setSelectedDay(day); }}
                                     title={`${v.travelTimeFromPrev} min drive`}
@@ -968,10 +1162,13 @@ export default function Schedule() {
                                 {/* Visit block */}
                                 <div
                                   data-event-block
-                                  className="absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden cursor-pointer hover:brightness-110 transition-all"
+                                  className={`absolute left-0.5 right-0.5 rounded-sm bg-primary text-primary-foreground overflow-hidden transition-all touch-none ${
+                                    isBeingDragged ? 'opacity-30 cursor-grabbing' : 'cursor-grab hover:brightness-110'
+                                  }`}
                                   style={{ top: startMin * MIN_HEIGHT, height: Math.max(visitDuration * MIN_HEIGHT, 8) }}
                                   onClick={(e) => handleEditVisit(e, day, i, v)}
-                                  title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)}`}
+                                  title={`${client?.name}: ${formatTime(v.startTime)} – ${formatTime(v.endTime)} (drag to move)`}
+                                  {...dragHandlers}
                                 >
                                   <div className="px-1 py-0.5">
                                     <p className="text-[10px] font-medium truncate">{client?.name}</p>
@@ -1008,12 +1205,31 @@ export default function Schedule() {
                       );
                     })}
                   </div>
+
+                  {/* Drag ghost element */}
+                  {isDragging && activeDrag && ghostPos && (
+                    <div
+                      className="fixed z-[100] pointer-events-none rounded-sm bg-primary/80 text-primary-foreground shadow-lg px-2 py-1 text-xs font-medium"
+                      style={{
+                        left: ghostPos.x + 12,
+                        top: ghostPos.y - 12,
+                        minWidth: 80,
+                      }}
+                    >
+                      {clients.find(c => c.id === activeDrag.clientId)?.name}
+                      {dragPosition && (
+                        <span className="block text-[10px] opacity-80">
+                          {formatTime(minToTime(dragPosition.minuteOfDay))} · {DAY_LABELS[dragPosition.day]}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })()}
 
             {/* Event popup (new / edit) */}
-            {eventPopup && (
+            {eventPopup && !isDragging && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setEventPopup(null)} />
                 <div
@@ -1254,7 +1470,6 @@ export default function Schedule() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {/* Daily totals */}
                     <div className="flex flex-wrap gap-4 text-xs pb-2 border-b">
                       <div>
                         <span className="text-muted-foreground">Travel: </span>
@@ -1383,4 +1598,177 @@ export default function Schedule() {
       )}
     </div>
   );
+}
+
+// =============================================================================
+// Conflict resolution for drag-and-drop
+// =============================================================================
+
+import type { Client as ClientType, WorkerProfile as WorkerType, TravelTimeMatrix as TTMatrix } from '@/types/models';
+
+/**
+ * Resolve conflicts when dropping a visit onto a day.
+ * - Places the dropped visit at its exact time
+ * - Bumps overlapping visits down, then tries up
+ * - Removes visits that can't fit
+ */
+function resolveConflicts(
+  droppedVisit: ScheduledVisit,
+  existingVisits: ScheduledVisit[],
+  day: DayOfWeek,
+  worker: WorkerType,
+  allClients: ClientType[],
+  travelTimes: TTMatrix,
+): { resolvedVisits: ScheduledVisit[]; removedClients: string[] } {
+  const whEnd = timeToMin(worker.workingHours.endTime);
+  const whStart = timeToMin(worker.workingHours.startTime);
+  const dropStart = timeToMin(droppedVisit.startTime);
+  const dropEnd = timeToMin(droppedVisit.endTime);
+
+  // Separate into: before, overlapping, and after
+  const before: ScheduledVisit[] = [];
+  const after: ScheduledVisit[] = [];
+  const overlapping: ScheduledVisit[] = [];
+
+  for (const v of existingVisits) {
+    const vStart = timeToMin(v.startTime);
+    const vEnd = timeToMin(v.endTime);
+    if (vEnd <= dropStart) {
+      before.push(v);
+    } else if (vStart >= dropEnd) {
+      after.push(v);
+    } else {
+      overlapping.push(v);
+    }
+  }
+
+  // Sort by start time
+  before.sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
+  after.sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
+  overlapping.sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
+
+  // Build the resolved list: before + dropped + overlapping(shifted) + after(shifted)
+  const allToPlace = [...overlapping, ...after];
+  const resolved: ScheduledVisit[] = [...before, droppedVisit];
+  const removed: string[] = [];
+
+  let currentEnd = dropEnd;
+
+  for (const v of allToPlace) {
+    const client = allClients.find(c => c.id === v.clientId);
+    if (!client) { removed.push(v.clientId); continue; }
+
+    const tw = client.timeWindows.find(w => w.day === day);
+    if (!tw) { removed.push(v.clientId); continue; }
+
+    const twStart = timeToMin(tw.startTime);
+    const twEnd = timeToMin(tw.endTime);
+
+    // Try to place after current end
+    let newStart = Math.max(currentEnd, twStart);
+    newStart = Math.ceil(newStart / 15) * 15;
+
+    // Skip breaks
+    for (const b of worker.breaks) {
+      const bs = timeToMin(b.startTime);
+      const be = timeToMin(b.endTime);
+      if (newStart < be && newStart + client.visitDurationMinutes > bs) {
+        newStart = be;
+        newStart = Math.ceil(newStart / 15) * 15;
+      }
+    }
+
+    const newEnd = newStart + client.visitDurationMinutes;
+
+    if (newEnd > twEnd || newEnd > whEnd) {
+      // Try placing before the dropped visit instead
+      const beforeStart = findSlotBefore(v.clientId, client, day, worker, resolved, whStart);
+      if (beforeStart !== null) {
+        const bEnd = beforeStart + client.visitDurationMinutes;
+        // Insert before the dropped visit
+        const insertVisit: ScheduledVisit = {
+          clientId: v.clientId,
+          startTime: minToTime(beforeStart),
+          endTime: minToTime(bEnd),
+          travelTimeFromPrev: 0,
+        };
+        // Find insert position
+        let insertIdx = 0;
+        for (let i = 0; i < resolved.length; i++) {
+          if (timeToMin(resolved[i].startTime) > beforeStart) break;
+          insertIdx = i + 1;
+        }
+        resolved.splice(insertIdx, 0, insertVisit);
+        continue;
+      }
+
+      removed.push(v.clientId);
+      continue;
+    }
+
+    resolved.push({
+      clientId: v.clientId,
+      startTime: minToTime(newStart),
+      endTime: minToTime(newEnd),
+      travelTimeFromPrev: 0,
+    });
+    currentEnd = newEnd;
+  }
+
+  // Sort final by start time
+  resolved.sort((a, b) => timeToMin(a.startTime) - timeToMin(b.startTime));
+
+  return { resolvedVisits: resolved, removedClients: removed };
+}
+
+/**
+ * Try to find a slot for a visit before a given set of already-placed visits.
+ * Returns start minute or null if not possible.
+ */
+function findSlotBefore(
+  clientId: string,
+  client: ClientType,
+  day: DayOfWeek,
+  worker: WorkerType,
+  placedVisits: ScheduledVisit[],
+  whStart: number,
+): number | null {
+  const tw = client.timeWindows.find(w => w.day === day);
+  if (!tw) return null;
+
+  const twStart = timeToMin(tw.startTime);
+  const twEnd = timeToMin(tw.endTime);
+
+  // Find gaps before each visit
+  let prevEnd = Math.max(whStart, twStart);
+  for (const v of placedVisits) {
+    const vStart = timeToMin(v.startTime);
+    const gapStart = prevEnd;
+    const gapEnd = vStart;
+
+    if (gapEnd - gapStart >= client.visitDurationMinutes) {
+      let start = gapStart;
+      start = Math.ceil(start / 15) * 15;
+
+      // Check breaks
+      let valid = true;
+      for (const b of worker.breaks) {
+        const bs = timeToMin(b.startTime);
+        const be = timeToMin(b.endTime);
+        if (start < be && start + client.visitDurationMinutes > bs) {
+          start = be;
+          start = Math.ceil(start / 15) * 15;
+        }
+      }
+
+      if (start + client.visitDurationMinutes <= gapEnd &&
+          start >= twStart && start + client.visitDurationMinutes <= twEnd) {
+        return start;
+      }
+    }
+
+    prevEnd = timeToMin(v.endTime);
+  }
+
+  return null;
 }
