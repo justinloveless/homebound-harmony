@@ -218,7 +218,7 @@ export default function Schedule() {
     const finalDays: DaySchedule[] = [];
     for (const d of updatedDays) {
       if (d.visits.length === 0) continue;
-      const recalced = recalcDaySchedule(d.visits, d.day, d.date, worker, clients, travelTimes);
+      const recalced = recalcDaySchedule(d.visits, d.day, d.date, worker, clients, travelTimes, true);
       if (recalced) finalDays.push(recalced);
     }
 
