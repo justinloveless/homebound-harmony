@@ -98,6 +98,13 @@ export default function Schedule() {
   const TOTAL_HEIGHT = 24 * HOUR_HEIGHT;
   const MIN_HEIGHT = TOTAL_HEIGHT / (24 * 60);
 
+  // Zoomed view: only show working hours with 1hr padding
+  const calStartHour = useMemo(() => {
+    const whStart = worker.workingHours.startTime.split(':').map(Number);
+    return Math.max(0, whStart[0] - 1);
+  }, [worker.workingHours.startTime]);
+  const calStartMinuteOffset = calStartHour * 60;
+
   // ========== Drag-and-drop handler ==========
   const handleDrop = useCallback((result: DropResult) => {
     console.debug('[calendar-drop] received drop result', result);
