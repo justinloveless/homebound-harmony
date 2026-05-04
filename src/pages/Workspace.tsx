@@ -1,44 +1,166 @@
+import { useState, useEffect } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { DAY_LABELS, DAYS_OF_WEEK } from '@/types/models';
+import { DAY_LABELS, DAYS_OF_WEEK, type DayOfWeek } from '@/types/models';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Clock, CalendarDays, Coffee } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Clock, CalendarDays, Coffee, Plus, X, Pencil, Check } from 'lucide-react';
 import { formatTime } from '@/lib/format-time';
+import { toast } from 'sonner';
 import Clients from './Clients';
 import Schedule from './Schedule';
 
 function WorkerAvailability() {
-  const { workspace } = useWorkspace();
-  const { worker } = workspace;
+  const { workspace, updateWorker } = useWorkspace();
+  const worker = workspace.worker;
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(worker);
 
-  const workingDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+  // Sync form when worker changes externally
+  useEffect(() => {
+    if (!editing) setForm(worker);
+  }, [worker, editing]);
+
+  const workingDays = DAYS_OF_WEEK.filter(d => !form.daysOff.includes(d));
+
+  const toggleDay = (day: DayOfWeek) => {
+    setForm(prev => ({
+      ...prev,
+      daysOff: prev.daysOff.includes(day)
+        ? prev.daysOff.filter(d => d !== day)
+        : [...prev.daysOff, day],
+    }));
+  };
+
+  const addBreak = () => {
+    setForm(prev => ({
+      ...prev,
+      breaks: [...prev.breaks, { startTime: '12:00', endTime: '13:00', label: '' }],
+    }));
+  };
+
+  const removeBreak = (i: number) => {
+    setForm(prev => ({ ...prev, breaks: prev.breaks.filter((_, idx) => idx !== i) }));
+  };
+
+  const updateBreak = (i: number, field: string, value: string) => {
+    setForm(prev => {
+      const breaks = [...prev.breaks];
+      breaks[i] = { ...breaks[i], [field]: value };
+      return { ...prev, breaks };
+    });
+  };
+
+  const handleSave = () => {
+    updateWorker(form);
+    setEditing(false);
+    toast.success('Availability updated');
+  };
+
+  const handleCancel = () => {
+    setForm(worker);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-primary" />
+              Availability
+            </CardTitle>
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEditing(true)}>
+              <Pencil className="h-3 w-3 mr-1" /> Edit
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2 text-sm">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">Hours:</span>
+            <span className="font-medium">{formatTime(worker.workingHours.startTime)} – {formatTime(worker.workingHours.endTime)}</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-muted-foreground">Days:</span>
+            <div className="flex gap-1 flex-wrap">
+              {DAYS_OF_WEEK.map(d => (
+                <Badge
+                  key={d}
+                  variant={!worker.daysOff.includes(d) ? 'default' : 'outline'}
+                  className={`text-[10px] px-1.5 py-0 ${!worker.daysOff.includes(d) ? '' : 'opacity-40'}`}
+                >
+                  {DAY_LABELS[d]}
+                </Badge>
+              ))}
+            </div>
+          </div>
+          {worker.breaks.length > 0 && (
+            <div className="flex items-start gap-2 text-sm">
+              <Coffee className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
+              <span className="text-muted-foreground">Breaks:</span>
+              <div className="flex flex-col gap-0.5">
+                {worker.breaks.map((b, i) => (
+                  <span key={i} className="font-medium">
+                    {b.label} ({formatTime(b.startTime)} – {formatTime(b.endTime)})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-primary" />
-          Availability
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <CalendarDays className="h-4 w-4 text-primary" />
+            Edit Availability
+          </CardTitle>
+          <div className="flex gap-1">
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={handleCancel}>
+              <X className="h-3 w-3 mr-1" /> Cancel
+            </Button>
+            <Button size="sm" className="h-7 px-2 text-xs" onClick={handleSave}>
+              <Check className="h-3 w-3 mr-1" /> Save
+            </Button>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         {/* Working hours */}
-        <div className="flex items-center gap-2 text-sm">
-          <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">Hours:</span>
-          <span className="font-medium">{formatTime(worker.workingHours.startTime)} – {formatTime(worker.workingHours.endTime)}</span>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" /> Working Hours
+          </label>
+          <div className="flex items-center gap-2">
+            <Input type="time" className="h-8 text-sm w-32" value={form.workingHours.startTime}
+              onChange={e => setForm({ ...form, workingHours: { ...form.workingHours, startTime: e.target.value } })} />
+            <span className="text-muted-foreground text-sm">to</span>
+            <Input type="time" className="h-8 text-sm w-32" value={form.workingHours.endTime}
+              onChange={e => setForm({ ...form, workingHours: { ...form.workingHours, endTime: e.target.value } })} />
+          </div>
         </div>
 
         {/* Working days */}
-        <div className="flex items-center gap-2 text-sm">
-          <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">Days:</span>
-          <div className="flex gap-1 flex-wrap">
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+            <CalendarDays className="h-3.5 w-3.5" /> Working Days
+          </label>
+          <div className="flex gap-1.5 flex-wrap">
             {DAYS_OF_WEEK.map(d => (
               <Badge
                 key={d}
                 variant={workingDays.includes(d) ? 'default' : 'outline'}
-                className={`text-[10px] px-1.5 py-0 ${workingDays.includes(d) ? '' : 'opacity-40'}`}
+                className={`text-[10px] px-2 py-0.5 cursor-pointer select-none transition-opacity ${workingDays.includes(d) ? '' : 'opacity-40'}`}
+                onClick={() => toggleDay(d)}
               >
                 {DAY_LABELS[d]}
               </Badge>
@@ -47,19 +169,30 @@ function WorkerAvailability() {
         </div>
 
         {/* Breaks */}
-        {worker.breaks.length > 0 && (
-          <div className="flex items-start gap-2 text-sm">
-            <Coffee className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
-            <span className="text-muted-foreground">Breaks:</span>
-            <div className="flex flex-col gap-0.5">
-              {worker.breaks.map((b, i) => (
-                <span key={i} className="font-medium">
-                  {b.label} ({formatTime(b.startTime)} – {formatTime(b.endTime)})
-                </span>
-              ))}
-            </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+            <Coffee className="h-3.5 w-3.5" /> Breaks
+          </label>
+          <div className="space-y-2">
+            {form.breaks.map((b, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input className="h-8 text-sm flex-1" placeholder="Label" value={b.label}
+                  onChange={e => updateBreak(i, 'label', e.target.value)} />
+                <Input type="time" className="h-8 text-sm w-28" value={b.startTime}
+                  onChange={e => updateBreak(i, 'startTime', e.target.value)} />
+                <span className="text-muted-foreground text-xs">–</span>
+                <Input type="time" className="h-8 text-sm w-28" value={b.endTime}
+                  onChange={e => updateBreak(i, 'endTime', e.target.value)} />
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => removeBreak(i)}>
+                  <X className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </div>
+            ))}
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addBreak}>
+              <Plus className="h-3 w-3 mr-1" /> Add Break
+            </Button>
           </div>
-        )}
+        </div>
       </CardContent>
     </Card>
   );
