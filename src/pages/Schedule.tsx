@@ -1606,7 +1606,7 @@ export default function Schedule() {
                     {selectedDaySchedule.visits.map((visit, i) => {
                       const client = clients.find(c => c.id === visit.clientId);
                       return (
-                        <div key={i}>
+                        <div key={i} onMouseEnter={() => setHoveredVisitIndex(i)} onMouseLeave={() => setHoveredVisitIndex(null)} className={`rounded-md transition-colors ${hoveredVisitIndex === i ? 'bg-accent/50' : ''}`}>
                           <div className="flex items-center gap-2 ml-4 text-[10px] text-muted-foreground py-1">
                             <div className="w-px h-4 bg-border" />
                             <Clock className="w-3 h-3" /> {visit.travelTimeFromPrev} min{visit.travelDistanceMiFromPrev != null ? ` · ${visit.travelDistanceMiFromPrev} mi` : ''} drive
