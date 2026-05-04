@@ -1119,7 +1119,7 @@ export default function Schedule() {
 
                           {/* Hour grid lines */}
                           {hours.map(h => (
-                            <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: h * HOUR_HEIGHT, height: HOUR_HEIGHT }} />
+                            <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: (h - startHour) * HOUR_HEIGHT, height: HOUR_HEIGHT }} />
                           ))}
 
                           {/* Working hours background */}
