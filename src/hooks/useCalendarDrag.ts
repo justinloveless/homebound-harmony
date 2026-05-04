@@ -111,7 +111,9 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
   }, [getDayAndMinute]);
 
   const handlePointerUp = useCallback(() => {
-    if (isDraggingRef.current && dragInfoRef.current) {
+    const wasDragging = isDraggingRef.current && hasMovedRef.current;
+
+    if (wasDragging && dragInfoRef.current) {
       // Get final position
       const pos = dragPosition;
       if (pos) {
@@ -121,6 +123,12 @@ export function useCalendarDrag(options: UseCalendarDragOptions) {
           dragInfo: dragInfoRef.current,
         });
       }
+    }
+
+    // If we actually dragged, suppress the upcoming click event
+    if (wasDragging) {
+      justFinishedDragRef.current = true;
+      setTimeout(() => { justFinishedDragRef.current = false; }, 50);
     }
 
     // Reset
