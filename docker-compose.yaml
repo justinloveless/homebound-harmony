@@ -42,9 +42,13 @@ services:
       PORT: "3000"
       PUBLIC_DIR: /app/public
       # SECURITY: replace these with cryptographically random values in .env
-      # before exposing this service to anyone but yourself.
-      TOTP_KEK: ${TOTP_KEK:?TOTP_KEK is required (64-char hex / 32 bytes). See .env.example}
-      IP_HASH_PEPPER: ${IP_HASH_PEPPER:?IP_HASH_PEPPER is required. See .env.example}
+      # before exposing this service to anyone but yourself. The app validates
+      # both at runtime (argon.ts / ipHash.ts) and refuses to operate without
+      # them. We deliberately avoid Compose's `${VAR:?msg}` guard here because
+      # Coolify's env-var discoverer treats the whole `${...}` body as a
+      # variable name, producing junk keys like `TOTP_KEK:?TOTP_KEK_is_...`.
+      TOTP_KEK: ${TOTP_KEK}
+      IP_HASH_PEPPER: ${IP_HASH_PEPPER}
     ports:
       - "${APP_PORT:-3000}:3000"
 
