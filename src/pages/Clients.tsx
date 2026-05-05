@@ -130,9 +130,9 @@ function TimeWindowEditor({ windows, onChange }: { windows: TimeWindow[]; onChan
       {windows.length > 0 && (
         <div className="space-y-1.5">
           {windows.map((w, i) => (
-            <div key={i} className="flex items-center gap-2 flex-wrap">
+            <div key={i} className="flex flex-col sm:flex-row sm:items-center gap-2">
               <Select value={w.day} onValueChange={v => updateWindow(i, 'day', v)}>
-                <SelectTrigger className="w-24 h-8 text-xs">
+                <SelectTrigger className="w-full sm:w-24 h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -141,12 +141,14 @@ function TimeWindowEditor({ windows, onChange }: { windows: TimeWindow[]; onChan
                   ))}
                 </SelectContent>
               </Select>
-              <Input type="time" value={w.startTime} onChange={e => updateWindow(i, 'startTime', e.target.value)} className="w-28 h-8 text-xs" />
-              <span className="text-xs text-muted-foreground">to</span>
-              <Input type="time" value={w.endTime} onChange={e => updateWindow(i, 'endTime', e.target.value)} className="w-28 h-8 text-xs" />
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeWindow(i)}>
-                <Trash2 className="w-3 h-3" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Input type="time" value={w.startTime} onChange={e => updateWindow(i, 'startTime', e.target.value)} className="flex-1 sm:flex-none sm:w-28 h-8 text-xs" />
+                <span className="text-xs text-muted-foreground">to</span>
+                <Input type="time" value={w.endTime} onChange={e => updateWindow(i, 'endTime', e.target.value)} className="flex-1 sm:flex-none sm:w-28 h-8 text-xs" />
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 flex-none" onClick={() => removeWindow(i)}>
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              </div>
             </div>
           ))}
           <Button type="button" variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => onChange([])}>
@@ -187,7 +189,7 @@ function ClientForm({ client, onSave, onCancel }: { client: Client; onSave: (c: 
           <AddressSearch id="address" value={form.address} onChange={(address, coords) => setForm({ ...form, address, coords: coords ?? form.coords })} />
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div>
           <Label>Duration (min)</Label>
           <Input type="number" value={form.visitDurationMinutes} min={15} step={15}

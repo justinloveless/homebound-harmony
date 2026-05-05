@@ -15,6 +15,7 @@ import RouteMap from '@/components/RouteMap';
 import { formatTime } from '@/lib/format-time';
 import { getTimeDependentTravelTimes } from '@/lib/google-maps';
 import { useCalendarDrag, type DropResult } from '@/hooks/useCalendarDrag';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 /** Popup state for adding/editing an event on the weekly calendar */
 interface EventPopup {
@@ -48,6 +49,7 @@ function minToTime(m: number): string {
 }
 
 export default function Schedule() {
+  const isMobile = useIsMobile();
   const { workspace, setSchedule, saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule, updateClient } = useWorkspace();
   const { worker, clients, travelTimes, lastSchedule } = workspace;
   const savedSchedules = workspace.savedSchedules ?? [];
@@ -1017,7 +1019,7 @@ export default function Schedule() {
       )}
 
       {lastSchedule && (
-        <Tabs defaultValue="weekly">
+        <Tabs defaultValue={isMobile ? 'daily' : 'weekly'}>
           <TabsList>
             <TabsTrigger value="weekly">Weekly View</TabsTrigger>
             <TabsTrigger value="daily">Daily View</TabsTrigger>
@@ -1058,7 +1060,7 @@ export default function Schedule() {
                       </span>
                     )}
                   </div>
-                  <div ref={calendarScrollRef} className={`flex overflow-x-auto overflow-y-auto max-h-[600px] ${isDragging ? 'select-none' : ''}`}
+                  <div ref={calendarScrollRef} className={`flex overflow-x-auto overflow-y-auto max-h-[50vh] sm:max-h-[600px] ${isDragging ? 'select-none' : ''}`}
                     style={{ scrollBehavior: isDragging ? 'auto' : 'smooth' }}>
                     {/* Time labels column */}
                     <div className="shrink-0 w-12 border-r bg-muted/20" style={{ height: ZOOMED_HEIGHT }}>

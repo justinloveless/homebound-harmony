@@ -156,8 +156,8 @@ export default function SettingsPage() {
               </Button>
             </div>
             {form.breaks.map((b, i) => (
-              <div key={i} className="flex items-center gap-2 mb-2">
-                <Input value={b.label} onChange={e => updateBreak(i, 'label', e.target.value)} placeholder="Label" className="w-24 h-8 text-xs" />
+              <div key={i} className="flex items-center gap-2 mb-2 flex-wrap">
+                <Input value={b.label} onChange={e => updateBreak(i, 'label', e.target.value)} placeholder="Label" className="w-full sm:w-24 h-8 text-xs" />
                 <Input type="time" value={b.startTime} onChange={e => updateBreak(i, 'startTime', e.target.value)} className="w-28 h-8 text-xs" />
                 <span className="text-xs text-muted-foreground">to</span>
                 <Input type="time" value={b.endTime} onChange={e => updateBreak(i, 'endTime', e.target.value)} className="w-28 h-8 text-xs" />
