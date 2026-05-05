@@ -1,6 +1,6 @@
 import Foundation
 import CryptoKit
-import CryptoSwift
+import RouteCareArgon2
 
 // E2EE primitives matching src/lib/crypto.ts exactly.
 //
@@ -59,24 +59,23 @@ final class CryptoService {
             throw CryptoError.invalidBase64
         }
 
-        // CryptoSwift Argon2id — variant .id matches Argon2id from the RFC.
-        let derived: [UInt8]
+        // Argon2id (PHC reference lib, pinned in RouteCareArgon2) — matches web `crypto.ts`.
+        let keyData: Data
         do {
-            derived = try Argon2.derive(
-                password:        Array(password.utf8),
-                salt:            Array(saltData),
-                iterations:      Int(argon2Iterations),
-                memoryKiB:       Int(argon2MemoryKiB),
-                threads:         Int(argon2Parallelism),
-                desiredKeyLength: argon2KeyLength,
-                variant:         .id
+            keyData = try deriveArgon2idRaw(
+                password: Data(password.utf8),
+                salt: saltData,
+                iterations: argon2Iterations,
+                memoryKiB: argon2MemoryKiB,
+                parallelism: argon2Parallelism,
+                keyLength: argon2KeyLength
             )
         } catch {
             throw CryptoError.argon2Failed(error)
         }
 
-        guard derived.count >= argon2KeyLength else { throw CryptoError.invalidKeyLength }
-        return SymmetricKey(data: Data(derived.prefix(argon2KeyLength)))
+        guard keyData.count >= argon2KeyLength else { throw CryptoError.invalidKeyLength }
+        return SymmetricKey(data: keyData.prefix(argon2KeyLength))
     }
 
     // MARK: - Key wrapping (envelope = base64(iv || AES-GCM(wrappingKey, rawWK)))

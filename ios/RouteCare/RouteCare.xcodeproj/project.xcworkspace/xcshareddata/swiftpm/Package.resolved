@@ -1,0 +1,14 @@
+{
+  "originHash" : "d937052c4e5e5f46d814877f3fcbc889f15b51f8acc711b95ee66688ad6faaa3",
+  "pins" : [
+    {
+      "identity" : "phc-winner-argon2",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/P-H-C/phc-winner-argon2.git",
+      "state" : {
+        "revision" : "f57e61e19229e23c4445b85494dbf7c07de721cb"
+      }
+    }
+  ],
+  "version" : 3
+}

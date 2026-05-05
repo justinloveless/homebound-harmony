@@ -251,7 +251,7 @@ struct ServerConfigView: View {
                 } header: {
                     Text("API Base URL")
                 } footer: {
-                    Text("The root URL of your Homebound Harmony server. Do not include a trailing slash.")
+                    Text("The root URL of your Homebound Harmony server. Do not include a trailing slash. On Coolify or similar, use the public HTTPS URL (often port 443, so no “:3000” in the address) unless you know that port serves TLS.")
                         .font(.caption)
                 }
             }

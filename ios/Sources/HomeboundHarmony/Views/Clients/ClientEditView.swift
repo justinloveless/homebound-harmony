@@ -78,13 +78,14 @@ struct ClientEditView: View {
                         }
                     }
                     Picker("Priority", selection: $priority) {
-                        ForEach(Priority.allCases, id: \.self) {
+                        ForEach(Priority.allCases, id: \.self) { p in
                             HStack {
                                 Circle()
-                                    .fill(priorityColor($0))
+                                    .fill(priorityColor(p))
                                     .frame(width: 8, height: 8)
-                                Text($0.label)
-                            }.tag($0)
+                                Text(p.label)
+                            }
+                            .tag(p)
                         }
                     }
                 }

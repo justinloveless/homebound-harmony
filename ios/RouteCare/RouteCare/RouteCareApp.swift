@@ -1,7 +1,14 @@
+//
+//  RouteCareApp.swift
+//  RouteCare
+//
+//  Created by Justin Noel Loveless on 5/5/26.
+//
+
 import SwiftUI
 
 @main
-struct HomeboundHarmonyApp: App {
+struct RouteCareApp: App {
     @State private var appState = AppState()
 
     var body: some Scene {

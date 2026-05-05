@@ -55,7 +55,8 @@ final class AppState {
     let notifications = NotificationService()
 
     private let keychain = KeychainService()
-    private lazy var sync = SyncService(api: api, crypto: crypto)
+    /// Sync is stateless; a fresh instance keeps `@Observable` macro compatibility (no `lazy` stored props).
+    private var sync: SyncService { SyncService(api: api, crypto: crypto) }
     private var workspaceKey: SymmetricKey?
 
     // MARK: - Startup
@@ -177,7 +178,7 @@ final class AppState {
     // MARK: - Logout
 
     func logout() async {
-        _ = try? await api.post(path: "/api/auth/logout", body: nil as String?)
+        let _: EmptyResponse? = try? await api.post(path: "/api/auth/logout", body: Optional<String>.none)
         workspaceKey = nil
         workspace    = nil
         keychain.deleteAll()

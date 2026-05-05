@@ -6,14 +6,19 @@ import Foundation
 // is persisted and sent on every subsequent request.
 
 enum APIError: LocalizedError {
+    /// Base URL missing, or the resolved URL is not absolute `http`/`https` (e.g. relative `/api/...`).
     case invalidURL
+    /// TLS failed (often `https` on a port that only speaks plain HTTP, e.g. internal app port behind Coolify).
+    case tlsHandshakeFailed
     case httpError(Int, String?)
     case decodingError(Error)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL:
-            return "Invalid server URL. Check Settings."
+            return "Server URL not set or invalid. Enter a full base URL like https://your-server.example.com (no trailing slash)."
+        case .tlsHandshakeFailed:
+            return "TLS handshake failed. On Coolify (and similar), the public URL is usually https://your-domain with no “:3000”—that port is often plain HTTP while TLS is on 443. Try that, or use http:// only if nothing on that port speaks TLS."
         case .httpError(let status, let msg):
             return msg ?? "Request failed (\(status))"
         case .decodingError(let err):
@@ -47,10 +52,7 @@ final class APIService {
         body: (any Encodable)? = nil,
         headers: [String: String] = [:]
     ) async throws -> T {
-        let urlString = baseURL + path
-        guard let url = URL(string: urlString) else {
-            throw APIError.invalidURL
-        }
+        let url = try Self.makeAbsoluteURL(baseURL: baseURL, path: path)
 
         var req = URLRequest(url: url)
         req.httpMethod = method
@@ -62,7 +64,12 @@ final class APIService {
         }
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
 
-        let (data, response) = try await session.data(for: req)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw Self.mapTransportError(error)
+        }
 
         guard let http = response as? HTTPURLResponse else {
             throw APIError.httpError(0, nil)
@@ -105,5 +112,31 @@ final class APIService {
 
     func delete<T: Decodable>(path: String) async throws -> T {
         try await request(method: "DELETE", path: path)
+    }
+
+    /// Ensures `URLSession` gets an absolute `http`/`https` URL; empty base yields a clear error instead of NSURLError -1002.
+    private static func makeAbsoluteURL(baseURL: String, path: String) throws -> URL {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw APIError.invalidURL }
+
+        let urlString = trimmed + path
+        guard let url = URL(string: urlString) else { throw APIError.invalidURL }
+
+        let scheme = url.scheme?.lowercased()
+        guard scheme == "http" || scheme == "https", url.host != nil else {
+            throw APIError.invalidURL
+        }
+        return url
+    }
+
+    private static func mapTransportError(_ error: Error) -> Error {
+        if let urlError = error as? URLError, urlError.code == .secureConnectionFailed {
+            return APIError.tlsHandshakeFailed
+        }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain, ns.code == NSURLErrorSecureConnectionFailed {
+            return APIError.tlsHandshakeFailed
+        }
+        return error
     }
 }
