@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { db } from '../db/client';
-import { users, workspaceBlobs } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { users, workspaceBlobs, auditEvents } from '../db/schema';
+import { and, eq } from 'drizzle-orm';
 import { hashPassword, verifyPassword, encryptTotpSecret, decryptTotpSecret } from '../auth/argon';
 import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/totp';
 import { createSession, deleteSession } from '../auth/session';
@@ -72,24 +72,55 @@ auth.post('/register', async (c) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'Invalid email' }, 400);
   if (password.length < 8) return c.json({ error: 'Password must be at least 8 characters' }, 400);
 
-  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email.toLowerCase()));
-  if (existing.length > 0) return c.json({ error: 'Email already in use' }, 409);
-
   const passwordHash = await hashPassword(password);
-  const [user] = await db.insert(users).values({
-    email: email.toLowerCase(),
-    passwordHash,
-    pdkSalt,
-    recoveryKeyHash,
-  }).returning({ id: users.id });
+  const normalizedEmail = email.toLowerCase();
 
-  await db.insert(workspaceBlobs).values({
-    userId: user.id,
-    wrappedWorkspaceKey,
-    wrappedWorkspaceKeyRecovery,
-  });
+  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, normalizedEmail));
 
-  const registrationToken = createRegToken(user.id);
+  let userId: string;
+  if (existing.length > 0) {
+    // An email already has a row, but the signup may have been abandoned
+    // before TOTP verification (the only point at which the account becomes
+    // usable). The `totp_enroll` audit event is written only after a
+    // successful /totp/verify, so its absence is a precise signal that the
+    // account has never been finalized and is safe to re-claim.
+    const finalized = await db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(and(eq(auditEvents.userId, existing[0].id), eq(auditEvents.action, 'totp_enroll')))
+      .limit(1);
+    if (finalized.length > 0) return c.json({ error: 'Email already in use' }, 409);
+
+    userId = existing[0].id;
+    await db.update(users).set({
+      passwordHash,
+      pdkSalt,
+      recoveryKeyHash,
+      totpSecretEncrypted: null,
+      updatedAt: new Date(),
+    }).where(eq(users.id, userId));
+    await db.update(workspaceBlobs).set({
+      wrappedWorkspaceKey,
+      wrappedWorkspaceKeyRecovery,
+      updatedAt: new Date(),
+    }).where(eq(workspaceBlobs.userId, userId));
+  } else {
+    const [user] = await db.insert(users).values({
+      email: normalizedEmail,
+      passwordHash,
+      pdkSalt,
+      recoveryKeyHash,
+    }).returning({ id: users.id });
+    userId = user.id;
+
+    await db.insert(workspaceBlobs).values({
+      userId,
+      wrappedWorkspaceKey,
+      wrappedWorkspaceKeyRecovery,
+    });
+  }
+
+  const registrationToken = createRegToken(userId);
   return c.json({ registrationToken }, 201);
 });
 
