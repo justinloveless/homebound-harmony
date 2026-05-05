@@ -1,18 +1,20 @@
-# Run the whole stack — Postgres + API + SPA — with one command:
+# Run the stack — Postgres + API + (optional) dev SPA:
 #
-#   docker compose up --build               # everything: db + api + dev SPA
-#   docker compose up --build app postgres  # production-style: API serves the prebuilt SPA on :3000
-#   docker compose up --build web           # dev SPA only; brings in api+postgres via depends_on
+#   docker compose up --build                  # production-style: postgres + app (API serves the prebuilt SPA on :3000)
+#   docker compose --profile dev up --build    # adds the Vite dev server (`web`) on :5173 for local hacking
+#   docker compose --profile dev up --build web   # dev SPA only; brings in api+postgres via depends_on
 #
-# Both `app` and `web` are built from the repo (no host bind mount), so this
-# compose file deploys cleanly on remote hosts like Coolify with a single
-# `docker compose up`.
+# `web` is gated behind the `dev` profile so it never starts on remote hosts
+# like Coolify — `docker compose up` (no profile) brings up only `postgres`
+# and `app`, which is the single service you should expose publicly. The
+# bundled SPA inside `app` is what real users see; `web` is purely a local
+# dev convenience and ships unminified code with a wider attack surface.
 #
-# Defaults are tuned for http://localhost:5173 (dev SPA via Vite, served by
-# the `web` container with source baked in; override with WEB_PORT) and
-# http://localhost:3000 (production SPA bundled into the API image). For a
-# real deployment, set NODE_ENV=production behind TLS so __Host-session
-# engages, and replace the example secrets in .env.
+# Defaults are tuned for http://localhost:3000 (production SPA bundled into
+# the API image) and, in dev-profile mode, http://localhost:5173 (Vite dev
+# server in the `web` container with source baked in; override with
+# WEB_PORT). For a real deployment, set NODE_ENV=production behind TLS so
+# __Host-session engages, and replace the example secrets in .env.
 
 services:
   postgres:
@@ -57,12 +59,14 @@ services:
     ports:
       - "${APP_PORT:-3000}:3000"
 
-  # Vite dev server. Source is baked into the image (Dockerfile target
-  # `web-dev`) rather than bind-mounted, so this works on remote hosts like
-  # Coolify where the repo isn't sitting next to the daemon. Local file
+  # Vite dev server. Gated behind the `dev` profile so plain `docker compose
+  # up` (which is what Coolify runs) never starts it — the bundled SPA inside
+  # `app` is what production users hit. Source is baked into the image
+  # (Dockerfile target `web-dev`) rather than bind-mounted, so local file
   # changes won't hot-reload through this container; if you want HMR against
   # your laptop's files, run `npm run dev` natively instead.
   web:
+    profiles: ["dev"]
     build:
       context: .
       dockerfile: Dockerfile
