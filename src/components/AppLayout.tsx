@@ -1,6 +1,8 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutGrid, Users, CalendarDays, Settings } from 'lucide-react';
+import { LayoutGrid, Users, CalendarDays, Settings, Share2, LogOut } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   Sidebar,
@@ -21,6 +23,7 @@ const navItems = [
   { to: '/', label: 'Workspace', icon: LayoutGrid },
   { to: '/clients', label: 'Clients', icon: Users },
   { to: '/schedule', label: 'Schedule', icon: CalendarDays },
+  { to: '/share/manage', label: 'Share', icon: Share2 },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -67,14 +70,25 @@ function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      {!collapsed && (
-        <SidebarFooter className="p-4 border-t border-sidebar-border">
-          <p className="text-[10px] text-sidebar-foreground/40">
-            Data stored locally • No account needed
-          </p>
-        </SidebarFooter>
-      )}
+      {!collapsed && <SidebarUserFooter />}
     </Sidebar>
+  );
+}
+
+function SidebarUserFooter() {
+  const auth = useAuth();
+  return (
+    <SidebarFooter className="p-4 border-t border-sidebar-border space-y-2">
+      {auth.me && (
+        <p className="text-[11px] text-sidebar-foreground/70 truncate" title={auth.me.email}>
+          {auth.me.email}
+        </p>
+      )}
+      <Button variant="ghost" size="sm" className="w-full justify-start text-xs" onClick={() => void auth.logout()}>
+        <LogOut className="w-3 h-3 mr-2" /> Sign out
+      </Button>
+      <p className="text-[10px] text-sidebar-foreground/40">End-to-end encrypted</p>
+    </SidebarFooter>
   );
 }
 

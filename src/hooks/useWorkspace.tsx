@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { loadWorkspace, saveWorkspace, autoSaveToFile, getCurrentFileHandle } from '@/lib/storage';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
+import { loadWorkspace as loadCached, saveWorkspace as saveCached } from '@/lib/storage';
 import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type TravelTimeErrors, type WeekSchedule, type SavedSchedule, DEFAULT_WORKSPACE, travelKey, estimateTravelMinutes, type Coords } from '@/types/models';
 import { getDistanceForNewLocation } from '@/lib/google-maps';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { pullWorkspace, pushWorkspace, subscribeWorkspaceUpdates, WorkspaceConflictError } from '@/lib/sync';
 
 /** Recalculate travel times for all location pairs that have coordinates */
 function recalcTravelTimes(ws: Workspace): TravelTimeMatrix {
@@ -22,7 +24,6 @@ function recalcTravelTimes(ws: Workspace): TravelTimeMatrix {
   return matrix;
 }
 
-/** Calculate Google Maps travel times for a newly added/updated client */
 async function calcGoogleTravelForClient(
   clientId: string,
   clientAddress: string,
@@ -32,7 +33,6 @@ async function calcGoogleTravelForClient(
 ) {
   if (!clientAddress.trim()) return;
 
-  // Gather existing locations with addresses
   const existingLocations: { id: string; address: string }[] = [];
   if (workspace.worker.homeAddress.trim()) {
     existingLocations.push({ id: 'home', address: workspace.worker.homeAddress });
@@ -57,7 +57,6 @@ async function calcGoogleTravelForClient(
 
       for (let i = 0; i < existingLocations.length; i++) {
         const key = travelKey(clientId, existingLocations[i].id);
-        // Use the average of to/from for the bidirectional key
         const to = toResults[i];
         const from = fromResults[i];
         if (to !== null && from !== null) {
@@ -80,7 +79,6 @@ async function calcGoogleTravelForClient(
     });
   } catch (err) {
     console.error('Auto travel time calc failed:', err);
-    // Silently fail - user can manually calculate later
   }
 }
 
@@ -100,29 +98,84 @@ interface WorkspaceContextValue {
   loadSavedSchedule: (id: string) => void;
   deleteSavedSchedule: (id: string) => void;
   renameSavedSchedule: (id: string, name: string) => void;
-  fileAutoSaveEnabled: boolean;
-  setFileAutoSaveEnabled: (enabled: boolean) => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
+  const auth = useAuth();
+  const wk = auth.workspaceKey;
   const [workspace, setWorkspace] = useState<Workspace>(DEFAULT_WORKSPACE);
   const [loading, setLoading] = useState(true);
-  const [fileAutoSaveEnabled, setFileAutoSaveEnabled] = useState(false);
 
+  // Serialized push chain. Each persist() chains onto the previous push so
+  // the version we send to the server is always monotonically increasing.
+  const versionRef = useRef<number>(0);
+  const pushChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  // Pull on auth ready, fall back to IndexedDB cache when offline.
   useEffect(() => {
-    loadWorkspace().then(ws => { setWorkspace(ws); setLoading(false); });
-  }, []);
+    if (!wk) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const cached = await loadCached();
+        if (!cancelled) setWorkspace(cached);
+      } catch { /* first run, no cache yet */ }
+      try {
+        const fresh = await pullWorkspace(wk);
+        if (cancelled) return;
+        setWorkspace(fresh.workspace);
+        versionRef.current = fresh.version;
+      } catch (err) {
+        console.warn('Workspace pull failed, using cache', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [wk]);
+
+  // SSE: another device pushed a new version → pull and replace.
+  useEffect(() => {
+    if (!wk) return;
+    const unsubscribe = subscribeWorkspaceUpdates(async (msg) => {
+      if (msg.version <= versionRef.current) return;
+      try {
+        const fresh = await pullWorkspace(wk);
+        setWorkspace(fresh.workspace);
+        versionRef.current = fresh.version;
+        toast.info('Workspace updated from another device');
+      } catch (err) {
+        console.warn('SSE-triggered pull failed', err);
+      }
+    });
+    return unsubscribe;
+  }, [wk]);
 
   const persist = useCallback((ws: Workspace) => {
-    setWorkspace(ws);
-    saveWorkspace(ws);
-    // Auto-save to linked file if enabled
-    if (fileAutoSaveEnabled && getCurrentFileHandle()) {
-      autoSaveToFile(ws);
-    }
-  }, [fileAutoSaveEnabled]);
+    saveCached(ws);
+    if (!wk) return;
+    pushChainRef.current = pushChainRef.current.then(async () => {
+      try {
+        const newVersion = await pushWorkspace(ws, wk, versionRef.current);
+        versionRef.current = newVersion;
+      } catch (err) {
+        if (err instanceof WorkspaceConflictError) {
+          try {
+            const fresh = await pullWorkspace(wk);
+            setWorkspace(fresh.workspace);
+            versionRef.current = fresh.version;
+            toast.warning('Workspace was updated on another device — local view refreshed');
+          } catch (pullErr) {
+            console.error('Conflict pull failed', pullErr);
+          }
+        } else {
+          console.error('Workspace push failed', err);
+        }
+      }
+    });
+  }, [wk]);
 
   const updateWorker = useCallback((worker: WorkerProfile) => {
     setWorkspace(prev => {
@@ -142,10 +195,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       const next = { ...prev, clients: [...prev.clients, client] };
       next.travelTimes = recalcTravelTimes(next);
       persist(next);
-
-      // Fire off Google Maps calculation in the background
       calcGoogleTravelForClient(client.id, client.address, next, persist, setWorkspace);
-
       return next;
     });
   }, [persist]);
@@ -156,12 +206,9 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       const next = { ...prev, clients: prev.clients.map(c => c.id === client.id ? client : c) };
       next.travelTimes = recalcTravelTimes(next);
       persist(next);
-
-      // Recalculate Google Maps times if address changed
       if (oldClient && oldClient.address !== client.address) {
         calcGoogleTravelForClient(client.id, client.address, next, persist, setWorkspace);
       }
-
       return next;
     });
   }, [persist]);
@@ -186,7 +233,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     setWorkspace(prev => { const next = { ...prev, lastSchedule }; persist(next); return next; });
   }, [persist]);
 
-  const replaceWorkspace = useCallback((ws: Workspace) => { persist(ws); }, [persist]);
+  const replaceWorkspace = useCallback((ws: Workspace) => {
+    setWorkspace(ws);
+    persist(ws);
+  }, [persist]);
 
   const saveSchedule = useCallback((name: string) => {
     setWorkspace(prev => {
@@ -234,7 +284,6 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       workspace, loading, updateWorker, setClients, addClient, updateClient,
       removeClient, setTravelTimes, setTravelTimeErrors, setSchedule, replaceWorkspace,
       saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule,
-      fileAutoSaveEnabled, setFileAutoSaveEnabled,
     }}>
       {children}
     </WorkspaceContext.Provider>

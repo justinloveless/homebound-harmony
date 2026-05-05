@@ -1,0 +1,24 @@
+{
+  "name": "homebound-harmony-server",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun src/db/migrate.ts"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "drizzle-orm": "^0.33.0",
+    "postgres": "^3.4.4",
+    "@node-rs/argon2": "^1.7.2",
+    "otpauth": "^9.3.4",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "drizzle-kit": "^0.24.0",
+    "typescript": "^5.5.0"
+  }
+}

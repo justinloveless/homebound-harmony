@@ -1,6 +1,10 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import { DEFAULT_WORKSPACE, type Workspace, frequencyToVisits } from '@/types/models';
 
+// IndexedDB now functions as a local cache only — the encrypted server blob
+// is the source of truth (see src/lib/sync.ts). The legacy File System
+// Access helpers have been removed.
+
 const DB_NAME = 'home-health-scheduler';
 const STORE_NAME = 'workspace';
 const WORKSPACE_KEY = 'current';
@@ -31,7 +35,6 @@ function migrateWorkspace(ws: Workspace): Workspace {
     }
     return { ...c, visitsPerPeriod: 1, period: 'week' as const };
   });
-  // Migrate missing schedulingStrategy
   const worker = ws.worker;
   if (!worker.schedulingStrategy) {
     worker.schedulingStrategy = 'spread';
@@ -57,72 +60,7 @@ export function exportWorkspace(ws: Workspace): string {
 export function importWorkspace(json: string): Workspace {
   const data = JSON.parse(json);
   if (data.version !== 1) throw new Error('Unsupported workspace version');
-  return data as Workspace;
-}
-
-// --- File System Access API helpers ---
-
-/** Check if the File System Access API is supported */
-export function isFileSystemAccessSupported(): boolean {
-  return 'showSaveFilePicker' in window && 'showOpenFilePicker' in window;
-}
-
-let _currentFileHandle: FileSystemFileHandle | null = null;
-
-/** Get the current file handle (for auto-save) */
-export function getCurrentFileHandle(): FileSystemFileHandle | null {
-  return _currentFileHandle;
-}
-
-/** Clear the current file handle */
-export function clearFileHandle(): void {
-  _currentFileHandle = null;
-}
-
-/** Save workspace to a file using the File System Access API picker */
-export async function saveWorkspaceToFile(ws: Workspace, existingHandle?: FileSystemFileHandle | null): Promise<FileSystemFileHandle> {
-  const handle = existingHandle ?? await (window as any).showSaveFilePicker({
-    suggestedName: `routecare-workspace.json`,
-    types: [{
-      description: 'JSON Workspace File',
-      accept: { 'application/json': ['.json'] },
-    }],
-  });
-  const writable = await handle.createWritable();
-  await writable.write(exportWorkspace(ws));
-  await writable.close();
-  _currentFileHandle = handle;
-  return handle;
-}
-
-/** Open a workspace file using the File System Access API picker */
-export async function openWorkspaceFromFile(): Promise<{ workspace: Workspace; handle: FileSystemFileHandle }> {
-  const [handle] = await (window as any).showOpenFilePicker({
-    types: [{
-      description: 'JSON Workspace File',
-      accept: { 'application/json': ['.json'] },
-    }],
-  });
-  const file = await handle.getFile();
-  const text = await file.text();
-  const ws = importWorkspace(text);
-  _currentFileHandle = handle;
-  return { workspace: ws, handle };
-}
-
-/** Auto-save workspace to the current file handle (no picker) */
-export async function autoSaveToFile(ws: Workspace): Promise<boolean> {
-  if (!_currentFileHandle) return false;
-  try {
-    const writable = await _currentFileHandle.createWritable();
-    await writable.write(exportWorkspace(ws));
-    await writable.close();
-    return true;
-  } catch {
-    // Permission revoked or file moved
-    _currentFileHandle = null;
-    return false;
-  }
+  return migrateWorkspace(data as Workspace);
 }
 
 export function downloadJson(content: string, filename: string) {

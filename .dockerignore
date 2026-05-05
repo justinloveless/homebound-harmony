@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+**/.DS_Store
+.git
+.github
+.vscode
+.cursor
+.claude
+.env
+.env.*
+playwright-report
+test-results
+coverage
+server/node_modules
+agent-transcripts
+specs

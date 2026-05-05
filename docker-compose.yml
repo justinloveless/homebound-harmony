@@ -1,0 +1,72 @@
+# Run the whole stack — Postgres + API + SPA — with one command:
+#
+#   docker compose up --build               # everything: db + api + dev SPA
+#   docker compose up --build app postgres  # production-style: API serves the prebuilt SPA on :3000
+#   docker compose up --build web           # dev SPA only; brings in api+postgres via depends_on
+#
+# Defaults are tuned for local testing on http://localhost:8080 (dev SPA via
+# Vite) and http://localhost:3000 (production SPA bundled into the API
+# image). For a real deployment, set NODE_ENV=production behind TLS so
+# __Host-session engages, and replace the example secrets in .env.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      # NODE_ENV=development keeps the cookie name plain `session` so plain
+      # HTTP works locally. Switch to `production` (and front this with TLS)
+      # for the __Host-session cookie.
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: "3000"
+      PUBLIC_DIR: /app/public
+      # SECURITY: replace these with cryptographically random values in .env
+      # before exposing this service to anyone but yourself.
+      TOTP_KEK: ${TOTP_KEK:?TOTP_KEK is required (64-char hex / 32 bytes). See .env.example}
+      IP_HASH_PEPPER: ${IP_HASH_PEPPER:?IP_HASH_PEPPER is required. See .env.example}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+
+  # Dev SPA with HMR. Source is bind-mounted; node_modules lives on a named
+  # volume so the host's (possibly Windows-built) node_modules doesn't leak
+  # into the Linux container.
+  web:
+    image: node:22-alpine
+    working_dir: /app
+    restart: unless-stopped
+    depends_on:
+      - app
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host"
+    environment:
+      VITE_API_PROXY_TARGET: http://app:3000
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./:/app
+      - web-node-modules:/app/node_modules
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+
+volumes:
+  postgres-data:
+  web-node-modules:

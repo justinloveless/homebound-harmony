@@ -1,25 +1,25 @@
 import React, { useState } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
-import { Download, Upload, Trash2, Plus, Copy, HardDrive, FolderOpen, Save } from 'lucide-react';
+import { Download, Upload, Trash2, Plus, Copy, KeyRound } from 'lucide-react';
 import { DAYS_OF_WEEK, DAY_LABELS, STRATEGY_LABELS, type DayOfWeek, type WorkerProfile, type SchedulingStrategy } from '@/types/models';
 import { AddressSearch } from '@/components/AddressSearch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { exportWorkspace, importWorkspace, downloadJson, isFileSystemAccessSupported, saveWorkspaceToFile, openWorkspaceFromFile, getCurrentFileHandle, clearFileHandle } from '@/lib/storage';
+import { exportWorkspace, importWorkspace, downloadJson } from '@/lib/storage';
+import { api } from '@/lib/api';
+import { derivePdk, generatePdkSalt, wrapKey } from '@/lib/crypto';
 import { toast } from 'sonner';
 
 export default function SettingsPage() {
-  const { workspace, updateWorker, replaceWorkspace, fileAutoSaveEnabled, setFileAutoSaveEnabled } = useWorkspace();
+  const { workspace, updateWorker, replaceWorkspace } = useWorkspace();
+  const auth = useAuth();
   const [form, setForm] = useState<WorkerProfile>(workspace.worker);
-  const [linkedFileName, setLinkedFileName] = useState<string | null>(
-    getCurrentFileHandle()?.name ?? null
-  );
 
   const handleSave = () => {
     updateWorker(form);
@@ -57,7 +57,7 @@ export default function SettingsPage() {
   const handleCopyToClipboard = async () => {
     const json = exportWorkspace(workspace);
     await navigator.clipboard.writeText(json);
-    toast.success('Workspace copied to clipboard');
+    toast.success('Workspace JSON copied');
   };
 
   const handleExport = () => {
@@ -66,6 +66,8 @@ export default function SettingsPage() {
     toast.success('Workspace exported');
   };
 
+  // Importer: read a workspace JSON file and replace the current encrypted
+  // blob with it. The encryption happens in useWorkspace.persist().
   const handleImport = () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -78,55 +80,13 @@ export default function SettingsPage() {
         const ws = importWorkspace(text);
         replaceWorkspace(ws);
         setForm(ws.worker);
-        toast.success('Workspace imported');
-      } catch {
-        toast.error('Invalid workspace file');
+        toast.success('Workspace imported and uploaded');
+      } catch (err: any) {
+        toast.error(err?.message ?? 'Invalid workspace file');
       }
     };
     input.click();
   };
-
-  // --- File System Access API handlers ---
-  const handleSaveToFile = async () => {
-    try {
-      const handle = await saveWorkspaceToFile(workspace);
-      setLinkedFileName(handle.name);
-      toast.success(`Saved to ${handle.name}`);
-    } catch (err: any) {
-      if (err?.name !== 'AbortError') toast.error('Failed to save file');
-    }
-  };
-
-  const handleSaveToCurrentFile = async () => {
-    try {
-      const handle = await saveWorkspaceToFile(workspace, getCurrentFileHandle());
-      setLinkedFileName(handle.name);
-      toast.success(`Saved to ${handle.name}`);
-    } catch (err: any) {
-      if (err?.name !== 'AbortError') toast.error('Failed to save file');
-    }
-  };
-
-  const handleOpenFromFile = async () => {
-    try {
-      const { workspace: ws, handle } = await openWorkspaceFromFile();
-      replaceWorkspace(ws);
-      setForm(ws.worker);
-      setLinkedFileName(handle.name);
-      toast.success(`Loaded from ${handle.name}`);
-    } catch (err: any) {
-      if (err?.name !== 'AbortError') toast.error('Failed to open file');
-    }
-  };
-
-  const handleUnlinkFile = () => {
-    clearFileHandle();
-    setLinkedFileName(null);
-    setFileAutoSaveEnabled(false);
-    toast.success('File unlinked');
-  };
-
-  const fsSupported = isFileSystemAccessSupported();
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -214,68 +174,20 @@ export default function SettingsPage() {
 
       <Separator />
 
-      {/* Cloud File Sync */}
-      {fsSupported && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <HardDrive className="w-5 h-5" /> Cloud File Sync
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Save and open your workspace directly from cloud storage folders like iCloud Drive, Google Drive, OneDrive, or Dropbox.
-              Requires their desktop sync app to be installed.
-            </p>
-
-            {linkedFileName && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/50 border text-sm">
-                <HardDrive className="w-4 h-4 text-primary shrink-0" />
-                <span className="flex-1 truncate">Linked: <strong>{linkedFileName}</strong></span>
-                <Button variant="ghost" size="sm" className="h-6 text-xs text-muted-foreground" onClick={handleUnlinkFile}>
-                  Unlink
-                </Button>
-              </div>
-            )}
-
-            <div className="flex gap-3 flex-wrap">
-              {linkedFileName ? (
-                <Button variant="outline" onClick={handleSaveToCurrentFile}>
-                  <Save className="w-4 h-4 mr-2" /> Save to File
-                </Button>
-              ) : null}
-              <Button variant="outline" onClick={handleSaveToFile}>
-                <Save className="w-4 h-4 mr-2" /> {linkedFileName ? 'Save As…' : 'Save to File…'}
-              </Button>
-              <Button variant="outline" onClick={handleOpenFromFile}>
-                <FolderOpen className="w-4 h-4 mr-2" /> Open from File…
-              </Button>
-            </div>
-
-            {linkedFileName && (
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={fileAutoSaveEnabled}
-                  onCheckedChange={setFileAutoSaveEnabled}
-                />
-                <Label className="text-sm">Auto-save changes to linked file</Label>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      <ChangePasswordCard pdkSalt={auth.me?.pdkSalt} workspaceKey={auth.workspaceKey} />
 
       <Card>
         <CardHeader>
-          <CardTitle>Data Management</CardTitle>
+          <CardTitle>Import / Export</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Export your workspace as a JSON file for backup or to sync across devices.
+            Export your workspace as JSON for offline backup. Importing replaces your current encrypted workspace
+            with the file's contents (re-encrypted on this device before upload).
           </p>
           <div className="flex gap-3 flex-wrap">
             <Button variant="outline" onClick={handleCopyToClipboard}>
-              <Copy className="w-4 h-4 mr-2" /> Copy to Clipboard
+              <Copy className="w-4 h-4 mr-2" /> Copy JSON
             </Button>
             <Button variant="outline" onClick={handleExport}>
               <Download className="w-4 h-4 mr-2" /> Export File
@@ -287,5 +199,84 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+interface ChangePasswordProps {
+  pdkSalt?: string;
+  workspaceKey: CryptoKey | null;
+}
+
+function ChangePasswordCard({ pdkSalt, workspaceKey }: ChangePasswordProps) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pdkSalt || !workspaceKey) { toast.error('Workspace not unlocked'); return; }
+    if (newPassword.length < 8) { toast.error('New password must be at least 8 characters'); return; }
+    if (newPassword !== confirm) { toast.error('Passwords do not match'); return; }
+
+    setSubmitting(true);
+    try {
+      // Re-wrap WK under the new PDK locally, then send both wrapped envelopes
+      // alongside the current/new passwords. We also re-derive the recovery
+      // wrapping key against the new salt so the recovery envelope keeps
+      // working without the user re-typing their recovery key.
+      const newPdkSalt = generatePdkSalt();
+      const newPdk = await derivePdk(newPassword, newPdkSalt);
+      const newWrappedWorkspaceKey = await wrapKey(workspaceKey, newPdk);
+      // Recovery envelope is left untouched: the recovery key + old salt
+      // combination still unwraps WK because the WK itself didn't change.
+      // (The plan calls out that password change re-wraps WK, not the
+      // recovery envelope.)
+      const blob = await api.get<{ wrappedWorkspaceKeyRecovery: string }>('/api/workspace');
+
+      await api.post('/api/auth/password/change', {
+        currentPassword,
+        newPassword,
+        newPdkSalt,
+        newWrappedWorkspaceKey,
+        newWrappedWorkspaceKeyRecovery: blob.wrappedWorkspaceKeyRecovery,
+      });
+
+      toast.success('Password updated. Sign in again next time you reload.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirm('');
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Password change failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><KeyRound className="w-5 h-5" /> Change password</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form className="space-y-3" onSubmit={onSubmit}>
+          <div>
+            <Label htmlFor="cur">Current password</Label>
+            <Input id="cur" type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="np">New password</Label>
+            <Input id="np" type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="conf">Confirm new password</Label>
+            <Input id="conf" type="password" required value={confirm} onChange={e => setConfirm(e.target.value)} />
+          </div>
+          <Button type="submit" disabled={submitting}>
+            {submitting ? 'Updating…' : 'Update password'}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
