@@ -242,6 +242,33 @@ final class AppState {
         try await persistWorkspace()
     }
 
+    // MARK: - Schedule editing
+
+    func updateDaySchedule(_ updatedDay: DaySchedule) async throws {
+        guard var ws = workspace, var sched = ws.lastSchedule else { return }
+
+        if let idx = sched.days.firstIndex(where: {
+            $0.day == updatedDay.day && $0.date == updatedDay.date
+        }) {
+            sched.days[idx] = updatedDay
+        } else {
+            sched.days.append(updatedDay)
+        }
+
+        // Recalculate week-level totals
+        sched.totalTravelMinutes = sched.days.reduce(0) { $0 + $1.totalTravelMinutes }
+        sched.totalTimeAwayMinutes = sched.days.reduce(0) { acc, d in
+            let leave = timeToMinutes(d.leaveHomeTime)
+            let arrive = timeToMinutes(d.arriveHomeTime)
+            return acc + max(0, arrive - leave)
+        }
+
+        ws.lastSchedule = sched
+        workspace = ws
+        try await persistWorkspace()
+        await scheduleNotifications()
+    }
+
     // MARK: - Worker profile
 
     func saveWorkerProfile(_ profile: WorkerProfile) async throws {
