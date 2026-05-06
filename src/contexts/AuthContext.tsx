@@ -16,13 +16,14 @@ export interface AuthMe {
   email: string;
   pdkSalt: string;
   totpEnrolled: boolean;
+  mfaDisabled?: boolean;
 }
 
 interface AuthContextValue {
   status: AuthStatus;
   me: AuthMe | null;
   workspaceKey: CryptoKey | null;
-  login: (email: string, password: string, code: string) => Promise<void>;
+  login: (email: string, password: string, code?: string) => Promise<void>;
   unlock: (password: string) => Promise<void>;
   logout: () => Promise<void>;
   // After registration completes (and login finishes), this lets the
@@ -58,7 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const login = useCallback(async (email: string, password: string, code: string) => {
+  const login = useCallback(async (email: string, password: string, code?: string) => {
     const { pdkSalt } = await api.post<{ pdkSalt: string }>('/api/auth/login', { email, password, code });
     const meData = await api.get<AuthMe>('/api/auth/me');
     const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/workspace');

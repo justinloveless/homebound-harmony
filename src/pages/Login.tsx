@@ -19,10 +19,11 @@ export default function LoginPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await auth.login(email.trim(), password, code.trim());
+      const trimmedCode = code.trim();
+      await auth.login(email.trim(), password, trimmedCode || undefined);
       navigate('/', { replace: true });
-    } catch (err: any) {
-      toast.error(err?.message ?? 'Login failed');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Login failed');
     } finally {
       setSubmitting(false);
     }
@@ -46,7 +47,7 @@ export default function LoginPage() {
             </div>
             <div>
               <Label htmlFor="code">Authenticator code</Label>
-              <Input id="code" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={e => setCode(e.target.value)} />
+              <Input id="code" inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code if required" value={code} onChange={e => setCode(e.target.value)} />
             </div>
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting ? 'Signing in…' : 'Sign in'}
