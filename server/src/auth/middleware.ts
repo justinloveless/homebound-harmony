@@ -4,7 +4,7 @@ import { getSession } from './session';
 import { db } from '../db/client';
 import { users } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { SESSION_COOKIE } from './cookie';
+import { SESSION_COOKIE, setSessionCookie } from './cookie';
 
 export const requireUser = createMiddleware(async (c, next) => {
   const sessionId = getCookie(c, SESSION_COOKIE);
@@ -19,5 +19,6 @@ export const requireUser = createMiddleware(async (c, next) => {
 
   c.set('userId', session.userId);
   c.set('user', user);
+  setSessionCookie(c, sessionId);
   await next();
 });

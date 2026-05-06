@@ -1,13 +1,13 @@
 import { Hono } from 'hono';
-import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { getCookie } from 'hono/cookie';
 import { db } from '../db/client';
 import { users, workspaceBlobs, auditEvents } from '../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { hashPassword, verifyPassword, encryptTotpSecret, decryptTotpSecret } from '../auth/argon';
 import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/totp';
-import { createSession, deleteSession, SESSION_COOKIE_MAX_AGE_SEC } from '../auth/session';
+import { createSession, deleteSession } from '../auth/session';
 import { requireUser } from '../auth/middleware';
-import { SESSION_COOKIE, SECURE_COOKIES } from '../auth/cookie';
+import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '../auth/cookie';
 import { logEvent } from '../services/audit';
 import { timingSafeEqual } from 'crypto';
 
@@ -48,16 +48,6 @@ function getClientIp(c: any): string {
   return c.req.header('x-forwarded-for')?.split(',')[0].trim()
     ?? c.req.header('x-real-ip')
     ?? 'unknown';
-}
-
-function setCookieSession(c: any, sessionId: string) {
-  setCookie(c, SESSION_COOKIE, sessionId, {
-    httpOnly: true,
-    secure: SECURE_COOKIES,
-    sameSite: 'Lax',
-    path: '/',
-    maxAge: SESSION_COOKIE_MAX_AGE_SEC,
-  });
 }
 
 // POST /api/auth/register
@@ -207,7 +197,7 @@ auth.post('/login', async (c) => {
 
   clearFails(normalEmail);
   const sessionId = await createSession(user.id);
-  setCookieSession(c, sessionId);
+  setSessionCookie(c, sessionId);
 
   await logEvent({ action: 'login', userId: user.id, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ pdkSalt: user.pdkSalt });
@@ -217,7 +207,7 @@ auth.post('/login', async (c) => {
 auth.post('/logout', requireUser, async (c) => {
   const sessionId = getCookie(c, SESSION_COOKIE);
   if (sessionId) await deleteSession(sessionId);
-  deleteCookie(c, SESSION_COOKIE, { path: '/' });
+  clearSessionCookie(c);
   const userId = (c as any).get('userId');
   await logEvent({ action: 'logout', userId, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ success: true });
