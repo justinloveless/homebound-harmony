@@ -174,7 +174,7 @@ export default function Schedule() {
     }
 
     // 1. Remove the dragged visit from its source day
-    let updatedDays = lastSchedule.days.map(d => ({ ...d, visits: [...d.visits] }));
+    const updatedDays = lastSchedule.days.map(d => ({ ...d, visits: [...d.visits] }));
 
     const sourceDay = updatedDays.find(d => d.day === dragInfo.sourceDay);
     if (sourceDay) {
@@ -607,7 +607,7 @@ export default function Schedule() {
     const onDay = new Set(daySchedule?.visits.map(v => v.clientId) ?? []);
     const editingClientId = eventPopup.mode === 'edit' ? eventPopup.clientId : null;
     return clients.filter(c => !onDay.has(c.id) || c.id === editingClientId);
-  }, [eventPopup?.day, eventPopup?.mode, eventPopup?.clientId, lastSchedule, clients]);
+  }, [eventPopup, lastSchedule, clients]);
 
   /** Handle clicking on the weekly calendar to add a new event */
   const handleCalendarClick = (e: React.MouseEvent<HTMLDivElement>, day: DayOfWeek, pixPerMin: number) => {
@@ -1109,6 +1109,7 @@ export default function Schedule() {
                                         {DAYS_OF_WEEK.filter(d => d !== day && !worker.daysOff.includes(d)).map(d => (
                                           <button
                                             key={d}
+                                            aria-label={`Copy to ${DAY_LABELS[d]}`}
                                             className="w-full text-left px-3 py-1 text-[11px] hover:bg-muted transition-colors"
                                             onClick={(e) => { e.stopPropagation(); copyDayTo(day, d); }}
                                           >
@@ -1573,10 +1574,41 @@ export default function Schedule() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <MapPin className="w-4 h-4" />
-                      {DAY_LABELS[selectedDaySchedule.day]} Route
-                    </CardTitle>
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <MapPin className="w-4 h-4" />
+                        {DAY_LABELS[selectedDaySchedule.day]} Route
+                      </CardTitle>
+                      <div className="relative shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          disabled={selectedDaySchedule.visits.length === 0}
+                          onClick={() => setCopyMenuDay(copyMenuDay === selectedDaySchedule.day ? null : selectedDaySchedule.day)}
+                        >
+                          <Copy className="w-3 h-3 mr-1" /> Copy Day
+                        </Button>
+                        {copyMenuDay === selectedDaySchedule.day && (
+                          <>
+                            <div className="fixed inset-0 z-20" onClick={() => setCopyMenuDay(null)} />
+                            <div className="absolute right-0 top-full z-30 mt-1 bg-popover border rounded-md shadow-md py-1 min-w-[120px]">
+                              <p className="text-[9px] text-muted-foreground px-2 pb-1">Copy to:</p>
+                              {DAYS_OF_WEEK.filter(d => d !== selectedDaySchedule.day && !worker.daysOff.includes(d)).map(d => (
+                                <button
+                                  key={d}
+                                  aria-label={`Copy to ${DAY_LABELS[d]}`}
+                                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors"
+                                  onClick={() => copyDayTo(selectedDaySchedule.day, d)}
+                                >
+                                  {DAY_LABELS[d]}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex flex-wrap gap-4 text-xs pb-2 border-b">
@@ -1905,7 +1937,6 @@ function findSlotBefore(
       start = Math.ceil(start / 15) * 15;
 
       // Check breaks
-      let valid = true;
       for (const b of worker.breaks) {
         const bs = timeToMin(b.startTime);
         const be = timeToMin(b.endTime);

@@ -60,7 +60,7 @@ final class KeychainService {
     // MARK: - Primitive Keychain operations
 
     private func save(_ data: Data, forKey key: String, accessible: CFString) {
-        var query: [CFString: Any] = [
+        let query: [CFString: Any] = [
             kSecClass:           kSecClassGenericPassword,
             kSecAttrAccount:     key,
             kSecAttrAccessible:  accessible,

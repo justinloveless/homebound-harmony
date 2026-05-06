@@ -59,7 +59,7 @@ struct ScheduleView: View {
             if let daySchedule = selectorDays.first(where: {
                 $0.day == (selectedDay ?? firstActiveDay(schedule, worker: worker))
             }) {
-                dayHeader(daySchedule)
+                dayHeader(daySchedule, selectorDays: selectorDays)
                 Divider()
                 TimelineDayView(
                     day: daySchedule,
@@ -123,7 +123,7 @@ struct ScheduleView: View {
 
     // MARK: - Day header
 
-    private func dayHeader(_ day: DaySchedule) -> some View {
+    private func dayHeader(_ day: DaySchedule, selectorDays: [DaySchedule]) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(formatDate(day.date))
@@ -139,6 +139,20 @@ struct ScheduleView: View {
             Label("\(day.visits.count) visits", systemImage: "person.2")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Menu {
+                ForEach(selectorDays.filter { $0.day != day.day }) { targetDay in
+                    Button("Copy to \(targetDay.day.fullLabel)") {
+                        copy(day, to: targetDay)
+                    }
+                }
+            } label: {
+                Label("Copy Day", systemImage: "doc.on.doc")
+                    .labelStyle(.iconOnly)
+                    .font(.body)
+                    .frame(width: 32, height: 32)
+            }
+            .disabled(day.visits.isEmpty || selectorDays.count < 2)
+            .accessibilityLabel("Copy Day")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -151,6 +165,31 @@ struct ScheduleView: View {
         Task {
             do {
                 try await appState.updateDaySchedule(updatedDay)
+            } catch {
+                saveError = error.localizedDescription
+            }
+            isSaving = false
+        }
+    }
+
+    private func copy(_ sourceDay: DaySchedule, to targetDay: DaySchedule) {
+        guard let worker else { return }
+        guard let copiedDay = copyDaySchedule(
+            from: sourceDay,
+            to: targetDay,
+            worker: worker,
+            clients: clients,
+            travelTimes: travelTimes
+        ) else {
+            saveError = "No visits on \(sourceDay.day.fullLabel) to copy."
+            return
+        }
+
+        isSaving = true
+        Task {
+            do {
+                try await appState.updateDaySchedule(copiedDay)
+                selectedDay = targetDay.day
             } catch {
                 saveError = error.localizedDescription
             }

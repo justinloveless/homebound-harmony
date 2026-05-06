@@ -127,6 +127,37 @@ func recalcDaySchedule(
     )
 }
 
+/// Copy one day's visits into another day and recalculate route timing for the target day.
+func copyDaySchedule(
+    from sourceDay: DaySchedule,
+    to targetDay: DaySchedule,
+    worker: WorkerProfile,
+    clients: [Client],
+    travelTimes: TravelTimeMatrix
+) -> DaySchedule? {
+    guard !sourceDay.visits.isEmpty else { return nil }
+
+    let copiedVisits = sourceDay.visits.map { visit in
+        ScheduledVisit(
+            clientId: visit.clientId,
+            startTime: visit.startTime,
+            endTime: visit.endTime,
+            travelTimeFromPrev: visit.travelTimeFromPrev,
+            travelDistanceMiFromPrev: visit.travelDistanceMiFromPrev,
+            manuallyPlaced: visit.manuallyPlaced
+        )
+    }
+
+    return recalcDaySchedule(
+        visits: copiedVisits,
+        day: targetDay,
+        worker: worker,
+        clients: clients,
+        travelTimes: travelTimes,
+        preserveManualTimes: true
+    )
+}
+
 // MARK: - Resolve conflicts
 
 struct ConflictResult {
