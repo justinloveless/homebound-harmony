@@ -103,9 +103,9 @@ final class AppState {
         }
     }
 
-    // MARK: - Login (email + password + TOTP)
+    // MARK: - Login (email + password, optional TOTP)
 
-    func login(email: String, password: String, totpCode: String) async throws {
+    func login(email: String, password: String, totpCode: String?) async throws {
         isLoading = true
         defer { isLoading = false }
         errorMessage = nil

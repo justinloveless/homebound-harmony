@@ -249,7 +249,7 @@ let defaultWorkspace = Workspace(
 struct LoginRequest: Encodable {
     let email: String
     let password: String
-    let code: String
+    let code: String?
 }
 
 struct LoginResponse: Decodable {
@@ -261,6 +261,7 @@ struct MeResponse: Decodable {
     let email: String
     let pdkSalt: String
     let totpEnrolled: Bool
+    let mfaDisabled: Bool?
 }
 
 struct ServerBlob: Decodable {

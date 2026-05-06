@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, bigint, timestamp, integer } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, bigint, timestamp, integer, boolean } from 'drizzle-orm/pg-core';
 
 const tstz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -8,6 +8,7 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   pdkSalt: text('pdk_salt').notNull(),
   totpSecretEncrypted: text('totp_secret_encrypted'),
+  mfaDisabled: boolean('mfa_disabled').notNull().default(false),
   recoveryKeyHash: text('recovery_key_hash').notNull(),
   masterPublicKey: text('master_public_key'),
   createdAt: tstz('created_at').defaultNow().notNull(),
