@@ -77,4 +77,87 @@ struct RouteCareTests {
         #expect(copiedDay.totalTravelMinutes == 30)
     }
 
+    @Test func generateWeekSchedulePlacesEligibleClient() async throws {
+        let worker = makeWorker()
+        let client = makeClient(
+            id: "client-a",
+            timeWindows: [
+                TimeWindow(day: .monday, startTime: "09:00", endTime: "12:00")
+            ]
+        )
+
+        let schedule = generateWeekSchedule(
+            worker: worker,
+            allClients: [client],
+            travelTimes: [:],
+            weekStartDate: "2026-05-04"
+        )
+
+        #expect(schedule.weekStartDate == "2026-05-04")
+        #expect(schedule.days.count == 1)
+        #expect(schedule.days.first?.day == .monday)
+        #expect(schedule.days.first?.visits.first?.clientId == "client-a")
+        #expect(schedule.unmetVisits == nil)
+    }
+
+    @Test func generateWeekScheduleIgnoresExcludedClients() async throws {
+        let worker = makeWorker()
+        let included = makeClient(
+            id: "included",
+            timeWindows: [
+                TimeWindow(day: .monday, startTime: "09:00", endTime: "12:00")
+            ]
+        )
+        let excluded = makeClient(
+            id: "excluded",
+            timeWindows: [
+                TimeWindow(day: .monday, startTime: "09:00", endTime: "12:00")
+            ],
+            excludedFromSchedule: true
+        )
+
+        let schedule = generateWeekSchedule(
+            worker: worker,
+            allClients: [included, excluded],
+            travelTimes: [:],
+            weekStartDate: "2026-05-04"
+        )
+
+        let scheduledClientIds = schedule.days.flatMap { $0.visits.map(\.clientId) }
+        #expect(scheduledClientIds == ["included"])
+        #expect(schedule.recommendedDrops == nil)
+    }
+
+    private func makeWorker() -> WorkerProfile {
+        WorkerProfile(
+            name: "Care Worker",
+            homeAddress: "100 Main St",
+            homeCoords: nil,
+            workingHours: WorkerProfile.WorkingHours(startTime: "08:00", endTime: "17:00"),
+            daysOff: [.saturday, .sunday],
+            breaks: [],
+            schedulingStrategy: .spread
+        )
+    }
+
+    private func makeClient(
+        id: String,
+        timeWindows: [TimeWindow],
+        excludedFromSchedule: Bool? = nil
+    ) -> Client {
+        Client(
+            id: id,
+            name: id,
+            address: "200 Main St",
+            coords: nil,
+            visitDurationMinutes: 30,
+            visitsPerPeriod: 1,
+            period: .week,
+            priority: .medium,
+            timeWindows: timeWindows,
+            notes: "",
+            excludedFromSchedule: excludedFromSchedule
+        )
+    }
+
 }

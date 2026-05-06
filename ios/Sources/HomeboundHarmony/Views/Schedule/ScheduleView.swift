@@ -9,11 +9,13 @@ struct ScheduleView: View {
     @State private var selectedDay: DayOfWeek?
     @State private var saveError: String? = nil
     @State private var isSaving = false
+    @State private var isGenerating = false
 
     private var schedule: WeekSchedule? { appState.workspace?.lastSchedule }
     private var clients: [Client] { appState.workspace?.clients ?? [] }
     private var worker: WorkerProfile? { appState.workspace?.worker }
     private var travelTimes: TravelTimeMatrix { appState.workspace?.travelTimes ?? [:] }
+    private var isBusy: Bool { appState.isSyncing || isSaving || isGenerating }
 
     var body: some View {
         NavigationStack {
@@ -26,16 +28,26 @@ struct ScheduleView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    if appState.isSyncing || isSaving {
+                    if isBusy {
                         ProgressView().scaleEffect(0.8)
                     } else {
-                        Button { Task { await appState.refreshWorkspace() } } label: {
-                            Image(systemName: "arrow.clockwise")
+                        HStack {
+                            Button {
+                                generateSchedule()
+                            } label: {
+                                Label(
+                                    schedule == nil ? "Generate Schedule" : "Regenerate Schedule",
+                                    systemImage: "calendar.badge.plus"
+                                )
+                            }
+                            Button { Task { await appState.refreshWorkspace() } } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
                         }
                     }
                 }
             }
-            .alert("Save failed", isPresented: Binding(
+            .alert("Schedule update failed", isPresented: Binding(
                 get: { saveError != nil },
                 set: { if !$0 { saveError = nil } }
             )) {
@@ -172,6 +184,21 @@ struct ScheduleView: View {
         }
     }
 
+    private func generateSchedule() {
+        isGenerating = true
+        Task {
+            do {
+                try await appState.generateSchedule()
+                if let schedule = appState.workspace?.lastSchedule {
+                    selectedDay = firstActiveDay(schedule, worker: appState.workspace?.worker ?? defaultWorkspace.worker)
+                }
+            } catch {
+                saveError = error.localizedDescription
+            }
+            isGenerating = false
+        }
+    }
+
     private func copy(_ sourceDay: DaySchedule, to targetDay: DaySchedule) {
         guard let worker else { return }
         guard let copiedDay = copyDaySchedule(
@@ -224,11 +251,22 @@ struct ScheduleView: View {
                 .foregroundStyle(.tertiary)
             Text("No schedule yet")
                 .font(.headline)
-            Text("Generate a schedule in the web app, then come back here.")
+            Text("Generate an optimized schedule from your clients and travel times.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            Button {
+                generateSchedule()
+            } label: {
+                if isGenerating {
+                    ProgressView()
+                } else {
+                    Label("Generate Schedule", systemImage: "calendar.badge.plus")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isBusy || appState.workspace == nil)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

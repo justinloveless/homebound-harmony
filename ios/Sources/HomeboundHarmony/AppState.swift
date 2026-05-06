@@ -265,6 +265,24 @@ final class AppState {
 
     // MARK: - Schedule editing
 
+    func generateSchedule() async throws {
+        guard var ws = workspace else { throw AppError.noWorkspace }
+
+        let schedule = generateWeekSchedule(
+            worker: ws.worker,
+            allClients: ws.clients,
+            travelTimes: ws.travelTimes,
+            weekStartDate: currentMondayISODate()
+        )
+
+        ws.lastSchedule = schedule
+        workspace = ws
+        visitRuntimeStore.prune(forSchedule: ws.lastSchedule)
+        touchVisitRuntimeUI()
+        try await persistWorkspace()
+        await scheduleNotifications()
+    }
+
     func updateDaySchedule(_ updatedDay: DaySchedule) async throws {
         guard var ws = workspace, var sched = ws.lastSchedule else { return }
 
