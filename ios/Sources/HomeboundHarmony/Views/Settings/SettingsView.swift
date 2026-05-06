@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage(MapsAppPreference.userDefaultsKey) private var preferredMapsAppRaw = MapsAppPreference.appleMaps.rawValue
     @State private var showWorkerEdit    = false
     @State private var showServerConfig  = false
     @State private var showNotifSettings = false
@@ -36,6 +37,19 @@ struct SettingsView: View {
                             if granted { await appState.scheduleNotifications() }
                         }
                     }
+                }
+
+                Section {
+                    Picker("Navigate with", selection: $preferredMapsAppRaw) {
+                        ForEach(MapsAppPreference.allCases) { pref in
+                            Text(pref.displayName).tag(pref.rawValue)
+                        }
+                    }
+                } header: {
+                    Text("Navigation")
+                } footer: {
+                    Text("iOS does not let you set a system-wide default maps app for all apps. This choice applies when you tap Navigate on the Today tab.")
+                        .font(.caption)
                 }
 
                 // Connection
@@ -94,7 +108,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Settings")
             .listStyle(.insetGrouped)
             .sheet(isPresented: $showWorkerEdit) {
                 WorkerProfileEditView()

@@ -3,6 +3,41 @@ import MapKit
 
 // Create or edit a client. When `client` is nil a new one is created on save.
 
+private enum TimeWindowDayPreset: String, CaseIterable {
+    case everyday
+    case weekdays
+    case weekends
+    case mwf
+    case tth
+    case singleDay
+    case custom
+
+    var menuLabel: String {
+        switch self {
+        case .everyday: return "Every day"
+        case .weekdays: return "Weekdays (Mon–Fri)"
+        case .weekends: return "Weekends"
+        case .mwf: return "Mon, Wed, Fri"
+        case .tth: return "Tue, Thu"
+        case .singleDay: return "One day"
+        case .custom: return "Custom days"
+        }
+    }
+
+    func resolvedDays(singleDay: DayOfWeek, customSelection: Set<DayOfWeek>) -> [DayOfWeek] {
+        switch self {
+        case .everyday: return Array(DayOfWeek.allCases)
+        case .weekdays: return [.monday, .tuesday, .wednesday, .thursday, .friday]
+        case .weekends: return [.saturday, .sunday]
+        case .mwf: return [.monday, .wednesday, .friday]
+        case .tth: return [.tuesday, .thursday]
+        case .singleDay: return [singleDay]
+        case .custom:
+            return DayOfWeek.allCases.filter { customSelection.contains($0) }
+        }
+    }
+}
+
 struct ClientEditView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -26,17 +61,28 @@ struct ClientEditView: View {
     @State private var isGeocoding  = false
     @State private var geocodeError = false
 
-    // Time window sheet
-    @State private var showAddWindow = false
-    @State private var newWindowDay  = DayOfWeek.monday
-    @State private var newStart      = "09:00"
-    @State private var newEnd        = "17:00"
+    // Time window sheet (add or edit)
+    @State private var showWindowSheet = false
+    @State private var editingWindowId: UUID?
+    @State private var sheetPreset     = TimeWindowDayPreset.singleDay
+    @State private var newWindowDay    = DayOfWeek.monday
+    @State private var customSelectedDays = Set<DayOfWeek>()
+    @State private var newStart        = "09:00"
+    @State private var newEnd          = "17:00"
 
     // Save state
     @State private var isSaving  = false
     @State private var saveError: String?
 
     private var isNew: Bool { existingClient == nil }
+
+    private var isEditingWindow: Bool { editingWindowId != nil }
+
+    private var windowSheetAddDisabled: Bool {
+        if newStart >= newEnd { return true }
+        if sheetPreset == .custom && customSelectedDays.isEmpty { return true }
+        return false
+    }
 
     var body: some View {
         NavigationStack {
@@ -98,22 +144,53 @@ struct ClientEditView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(timeWindows) { tw in
-                            HStack {
-                                Text(tw.day.fullLabel)
-                                    .frame(width: 90, alignment: .leading)
-                                Text("\(tw.startTime.formatted12h) – \(tw.endTime.formatted12h)")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                            HStack(alignment: .center, spacing: 8) {
+                                HStack {
+                                    Text(tw.day.fullLabel)
+                                        .frame(width: 90, alignment: .leading)
+                                        .foregroundStyle(.primary)
+                                    Text("\(tw.startTime.formatted12h) – \(tw.endTime.formatted12h)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture { openWindowSheetForEdit(tw) }
+
+                                Button(role: .destructive) {
+                                    timeWindows.removeAll { $0.id == tw.id }
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.body)
+                                        .frame(minWidth: 44, minHeight: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Delete time window")
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button("Delete", role: .destructive) {
+                                    timeWindows.removeAll { $0.id == tw.id }
+                                }
+                            }
+                            .contextMenu {
+                                Button("Edit") { openWindowSheetForEdit(tw) }
+                                Button("Delete", role: .destructive) {
+                                    timeWindows.removeAll { $0.id == tw.id }
+                                }
                             }
                         }
-                        .onDelete { indices in timeWindows.remove(atOffsets: indices) }
                     }
-                    Button("Add Time Window") { showAddWindow = true }
+                    Button("Add Time Window") { openWindowSheetForAdd() }
                 } header: {
                     Text("Availability Windows")
                 } footer: {
-                    Text("Leave empty to allow visits at any time during working hours.")
-                        .font(.caption)
+                    Text(
+                        "Leave empty to allow visits at any time during working hours. "
+                            + "Scheduling uses at most one window per weekday (15-minute times). "
+                            + "Tap a row to edit, or the trash button to remove it."
+                    )
+                    .font(.caption)
                 }
 
                 // Notes
@@ -151,49 +228,165 @@ struct ClientEditView: View {
                 }
             }
             .onAppear(perform: loadExisting)
-            .sheet(isPresented: $showAddWindow) {
-                addTimeWindowSheet
+            .sheet(isPresented: $showWindowSheet, onDismiss: { editingWindowId = nil }) {
+                windowSheet
             }
         }
     }
 
-    // MARK: - Add time window sheet
+    // MARK: - Time window sheet
 
-    private var addTimeWindowSheet: some View {
+    private var windowSheet: some View {
         NavigationStack {
             Form {
-                Picker("Day", selection: $newWindowDay) {
-                    ForEach(DayOfWeek.allCases) { day in
-                        Text(day.fullLabel).tag(day)
+                if isEditingWindow {
+                    Picker("Day", selection: $newWindowDay) {
+                        ForEach(DayOfWeek.allCases) { day in
+                            Text(day.fullLabel).tag(day)
+                        }
+                    }
+                } else {
+                    Section {
+                        Picker("Repeat", selection: $sheetPreset) {
+                            ForEach(TimeWindowDayPreset.allCases, id: \.self) { preset in
+                                Text(preset.menuLabel).tag(preset)
+                            }
+                        }
+                    }
+
+                    if sheetPreset == .singleDay {
+                        Picker("Day", selection: $newWindowDay) {
+                            ForEach(DayOfWeek.allCases) { day in
+                                Text(day.fullLabel).tag(day)
+                            }
+                        }
+                    }
+
+                    if sheetPreset == .custom {
+                        Section("Days") {
+                            ForEach(DayOfWeek.allCases) { day in
+                                Toggle(isOn: customDayBinding(day)) {
+                                    Text(day.fullLabel)
+                                }
+                            }
+                        }
                     }
                 }
-                HStack {
-                    Text("Start")
-                    Spacer()
-                    TimePickerField(time: $newStart)
-                }
-                HStack {
-                    Text("End")
-                    Spacer()
-                    TimePickerField(time: $newEnd)
+
+                Section {
+                    LabeledContent("Start") {
+                        QuarterHourTimePicker(timeHHMM: $newStart)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    LabeledContent("End") {
+                        QuarterHourTimePicker(timeHHMM: $newEnd)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
                 }
             }
-            .navigationTitle("Add Window")
+            .navigationTitle(isEditingWindow ? "Edit Window" : "Add Window")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showAddWindow = false }
+                    Button("Cancel") {
+                        showWindowSheet = false
+                        editingWindowId = nil
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        timeWindows.append(TimeWindow(day: newWindowDay, startTime: newStart, endTime: newEnd))
-                        showAddWindow = false
+                    if isEditingWindow {
+                        Button("Save") {
+                            confirmEditWindow()
+                        }
+                        .disabled(newStart >= newEnd)
+                    } else {
+                        Button("Add") {
+                            confirmAddWindows()
+                        }
+                        .disabled(windowSheetAddDisabled)
                     }
-                    .disabled(newStart >= newEnd)
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+    }
+
+    private func customDayBinding(_ day: DayOfWeek) -> Binding<Bool> {
+        Binding(
+            get: { customSelectedDays.contains(day) },
+            set: { on in
+                if on { customSelectedDays.insert(day) }
+                else { customSelectedDays.remove(day) }
+            }
+        )
+    }
+
+    private func openWindowSheetForAdd() {
+        editingWindowId = nil
+        sheetPreset = .singleDay
+        newWindowDay = .monday
+        customSelectedDays = []
+        newStart = "09:00"
+        newEnd = "17:00"
+        showWindowSheet = true
+    }
+
+    private func openWindowSheetForEdit(_ tw: TimeWindow) {
+        editingWindowId = tw.id
+        sheetPreset = .singleDay
+        newWindowDay = tw.day
+        customSelectedDays = []
+        newStart = snapToQuarterHHMM(tw.startTime)
+        newEnd = snapToQuarterHHMM(tw.endTime)
+        showWindowSheet = true
+    }
+
+    private func orderedDaysForAdd() -> [DayOfWeek] {
+        let resolved = sheetPreset.resolvedDays(singleDay: newWindowDay, customSelection: customSelectedDays)
+        let set = Set(resolved)
+        return DayOfWeek.allCases.filter { set.contains($0) }
+    }
+
+    private func confirmAddWindows() {
+        let days = orderedDaysForAdd()
+        guard !days.isEmpty, newStart < newEnd else { return }
+        let daySet = Set(days)
+        timeWindows.removeAll { daySet.contains($0.day) }
+        for d in days {
+            timeWindows.append(TimeWindow(day: d, startTime: newStart, endTime: newEnd))
+        }
+        sortTimeWindows()
+        showWindowSheet = false
+        editingWindowId = nil
+    }
+
+    private func confirmEditWindow() {
+        guard let id = editingWindowId, newStart < newEnd else { return }
+        timeWindows.removeAll { $0.day == newWindowDay && $0.id != id }
+        guard let idx = timeWindows.firstIndex(where: { $0.id == id }) else { return }
+        timeWindows[idx] = TimeWindow(id: id, day: newWindowDay, startTime: newStart, endTime: newEnd)
+        sortTimeWindows()
+        showWindowSheet = false
+        editingWindowId = nil
+    }
+
+    private func sortTimeWindows() {
+        let order = DayOfWeek.allCases
+        timeWindows.sort {
+            let ia = order.firstIndex(of: $0.day) ?? 0
+            let ib = order.firstIndex(of: $1.day) ?? 0
+            if ia != ib { return ia < ib }
+            if $0.startTime != $1.startTime { return $0.startTime < $1.startTime }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+    }
+
+    private func snapToQuarterHHMM(_ s: String) -> String {
+        let parts = s.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2 else { return s }
+        var minutes = parts[0] * 60 + parts[1]
+        minutes = min(23 * 60 + 45, max(0, (minutes + 7) / 15 * 15))
+        return String(format: "%02d:%02d", minutes / 60, minutes % 60)
     }
 
     // MARK: - Actions
@@ -264,30 +457,5 @@ struct ClientEditView: View {
         case .medium: return .orange
         case .low:    return .green
         }
-    }
-}
-
-// MARK: - Simple HH:MM picker
-
-struct TimePickerField: View {
-    @Binding var time: String
-    @State private var date = Date()
-
-    var body: some View {
-        DatePicker("", selection: $date, displayedComponents: .hourAndMinute)
-            .labelsHidden()
-            .onChange(of: date) { _, new in
-                let parts = Calendar.current.dateComponents([.hour, .minute], from: new)
-                time = String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
-            }
-            .onAppear {
-                let parts = time.split(separator: ":").compactMap { Int($0) }
-                if parts.count == 2,
-                   let d = Calendar.current.date(
-                    bySettingHour: parts[0], minute: parts[1], second: 0, of: Date()
-                   ) {
-                    date = d
-                }
-            }
     }
 }

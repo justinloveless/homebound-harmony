@@ -5,7 +5,7 @@ import { users, workspaceBlobs, auditEvents } from '../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { hashPassword, verifyPassword, encryptTotpSecret, decryptTotpSecret } from '../auth/argon';
 import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/totp';
-import { createSession, deleteSession } from '../auth/session';
+import { createSession, deleteSession, SESSION_COOKIE_MAX_AGE_SEC } from '../auth/session';
 import { requireUser } from '../auth/middleware';
 import { SESSION_COOKIE, SECURE_COOKIES } from '../auth/cookie';
 import { logEvent } from '../services/audit';
@@ -56,7 +56,7 @@ function setCookieSession(c: any, sessionId: string) {
     secure: SECURE_COOKIES,
     sameSite: 'Lax',
     path: '/',
-    maxAge: 12 * 60 * 60,
+    maxAge: SESSION_COOKIE_MAX_AGE_SEC,
   });
 }
 
@@ -75,16 +75,17 @@ auth.post('/register', async (c) => {
   const passwordHash = await hashPassword(password);
   const normalizedEmail = email.toLowerCase();
 
-  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, normalizedEmail));
+  const existing = await db
+    .select({ id: users.id, mfaDisabled: users.mfaDisabled })
+    .from(users)
+    .where(eq(users.email, normalizedEmail));
 
   let userId: string;
   if (existing.length > 0) {
     // An email already has a row, but the signup may have been abandoned
-    // before TOTP verification (the only point at which the account becomes
-    // usable). The `totp_enroll` audit event is written only after a
-    // successful /totp/verify, so its absence is a precise signal that the
-    // account has never been finalized and is safe to re-claim.
-    const finalized = await db
+    // before the account became usable. MFA-disabled review accounts are
+    // considered finalized even without a TOTP enrollment audit event.
+    const finalized = existing[0].mfaDisabled ? [{ id: existing[0].id }] : await db
       .select({ id: auditEvents.id })
       .from(auditEvents)
       .where(and(eq(auditEvents.userId, existing[0].id), eq(auditEvents.action, 'totp_enroll')))
@@ -97,6 +98,7 @@ auth.post('/register', async (c) => {
       pdkSalt,
       recoveryKeyHash,
       totpSecretEncrypted: null,
+      mfaDisabled: false,
       updatedAt: new Date(),
     }).where(eq(users.id, userId));
     await db.update(workspaceBlobs).set({
@@ -174,7 +176,7 @@ auth.post('/totp/verify', async (c) => {
 auth.post('/login', async (c) => {
   const body = await c.req.json().catch(() => null);
   const { email, password, code } = body ?? {};
-  if (!email || !password || !code) return c.json({ error: 'Missing fields' }, 400);
+  if (!email || !password) return c.json({ error: 'Missing fields' }, 400);
 
   const normalEmail = email.toLowerCase();
 
@@ -190,14 +192,17 @@ auth.post('/login', async (c) => {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
-  if (!user.totpSecretEncrypted) {
-    return c.json({ error: 'TOTP enrollment incomplete. Please complete registration.' }, 403);
-  }
+  if (!user.mfaDisabled) {
+    if (!user.totpSecretEncrypted) {
+      return c.json({ error: 'TOTP enrollment incomplete. Please complete registration.' }, 403);
+    }
+    if (!code) return c.json({ error: 'Missing TOTP code' }, 400);
 
-  const secret = await decryptTotpSecret(user.totpSecretEncrypted);
-  if (!verifyTotpCode(secret, code)) {
-    recordFail(normalEmail);
-    return c.json({ error: 'Invalid TOTP code' }, 401);
+    const secret = await decryptTotpSecret(user.totpSecretEncrypted);
+    if (!verifyTotpCode(secret, code)) {
+      recordFail(normalEmail);
+      return c.json({ error: 'Invalid TOTP code' }, 401);
+    }
   }
 
   clearFails(normalEmail);
@@ -226,6 +231,7 @@ auth.get('/me', requireUser, async (c) => {
     email: user.email,
     pdkSalt: user.pdkSalt,
     totpEnrolled: !!user.totpSecretEncrypted,
+    mfaDisabled: user.mfaDisabled,
   });
 });
 

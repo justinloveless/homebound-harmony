@@ -55,7 +55,7 @@ struct LoginView: View {
                         }
 
                         LabeledField("Authenticator Code") {
-                            TextField("6-digit code", text: $totp)
+                            TextField("6-digit code if required", text: $totp)
                                 .keyboardType(.numberPad)
                         }
                     }
@@ -83,7 +83,7 @@ struct LoginView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(
-                        isLoading || !serverConfigured || email.isEmpty || password.isEmpty || totp.isEmpty
+                        isLoading || !serverConfigured || email.isEmpty || password.isEmpty
                     )
 
                     Text("Your data is end-to-end encrypted.\nThe server never sees your schedule.")
@@ -149,7 +149,14 @@ struct LoginView: View {
         Task {
             defer { isLoading = false }
             do {
-                try await appState.login(email: email, password: password, totpCode: totp)
+                let trimmedTotp = totp.trimmingCharacters(in: .whitespacesAndNewlines)
+                try await appState.login(
+                    email: email,
+                    password: password,
+                    totpCode: trimmedTotp.isEmpty ? nil : trimmedTotp
+                )
+            } catch APIError.httpError(400, let message) where message == "Missing TOTP code" {
+                errorMsg = "Authenticator code is required for this account."
             } catch APIError.httpError(401, _) {
                 errorMsg = "Invalid credentials or TOTP code."
             } catch APIError.httpError(403, _) {

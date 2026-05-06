@@ -8,6 +8,13 @@
       "when": 1777938708081,
       "tag": "0000_closed_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778090884104,
+      "tag": "0001_clever_microchip",
+      "breakpoints": true
     }
   ]
 }
