@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		964A0F452FAAEBB100342CD0 /* RouteCareArgon2 in Frameworks */ = {isa = PBXBuildFile; productRef = BD2010052FAA977300342CD0 /* RouteCareArgon2 */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		964A0D0A2FAA977200342CD0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -45,7 +49,7 @@
 			path = RouteCareUITests;
 			sourceTree = "<group>";
 		};
-		BD2010012FAA977300342CD0 /* HomeboundHarmonySources */ = {
+		BD2010012FAA977300342CD0 /* ../Sources/HomeboundHarmony */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = ../Sources/HomeboundHarmony;
 			sourceTree = "<group>";
@@ -57,6 +61,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				964A0F452FAAEBB100342CD0 /* RouteCareArgon2 in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,7 +86,7 @@
 			isa = PBXGroup;
 			children = (
 				964A0CFC2FAA976C00342CD0 /* RouteCare */,
-				BD2010012FAA977300342CD0 /* HomeboundHarmonySources */,
+				BD2010012FAA977300342CD0 /* ../Sources/HomeboundHarmony */,
 				964A0D0C2FAA977200342CD0 /* RouteCareTests */,
 				964A0D162FAA977200342CD0 /* RouteCareUITests */,
 				964A0CFB2FAA976C00342CD0 /* Products */,
@@ -115,11 +120,11 @@
 			);
 			fileSystemSynchronizedGroups = (
 				964A0CFC2FAA976C00342CD0 /* RouteCare */,
-				BD2010012FAA977300342CD0 /* HomeboundHarmonySources */,
+				BD2010012FAA977300342CD0 /* ../Sources/HomeboundHarmony */,
 			);
 			name = RouteCare;
 			packageProductDependencies = (
-				BD2010052FAA977300342CD0 /* Argon2Swift */,
+				BD2010052FAA977300342CD0 /* RouteCareArgon2 */,
 			);
 			productName = RouteCare;
 			productReference = 964A0CFA2FAA976C00342CD0 /* RouteCare.app */;
@@ -279,21 +284,6 @@
 		};
 /* End PBXTargetDependency section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		BD2010062FAA977300342CD0 /* XCLocalSwiftPackageReference "../SupportPackages/RouteCareArgon2" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../SupportPackages/RouteCareArgon2;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		BD2010052FAA977300342CD0 /* RouteCareArgon2 */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BD2010062FAA977300342CD0 /* XCLocalSwiftPackageReference "../SupportPackages/RouteCareArgon2" */;
-			productName = RouteCareArgon2;
-		};
-/* End XCSwiftPackageProductDependency section */
-
 /* Begin XCBuildConfiguration section */
 		964A0D1B2FAA977300342CD0 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -426,6 +416,7 @@
 				DEVELOPMENT_TEAM = L7H7BM3TDV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "RouteCare uses your location for schedule and routing features.";
 				INFOPLIST_KEY_NSUserNotificationsUsageDescription = "RouteCare may send reminders about visits and schedule changes.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -460,6 +451,7 @@
 				DEVELOPMENT_TEAM = L7H7BM3TDV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "RouteCare uses your location for schedule and routing features.";
 				INFOPLIST_KEY_NSUserNotificationsUsageDescription = "RouteCare may send reminders about visits and schedule changes.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -608,6 +600,21 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		BD2010062FAA977300342CD0 /* XCLocalSwiftPackageReference "../SupportPackages/RouteCareArgon2" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../SupportPackages/RouteCareArgon2;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BD2010052FAA977300342CD0 /* RouteCareArgon2 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BD2010062FAA977300342CD0 /* XCLocalSwiftPackageReference "../SupportPackages/RouteCareArgon2" */;
+			productName = RouteCareArgon2;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 964A0CF22FAA976C00342CD0 /* Project object */;
 }

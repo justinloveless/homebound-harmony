@@ -19,6 +19,16 @@ private let eventPad: CGFloat = 2
 private let visibleStartHour = 6
 private let visibleEndHour = 21
 
+/// FNV-1a 32-bit — deterministic for a given string. `String.hashValue` is seeded per process, so it changes every app launch.
+private func fnv1aHash32(_ string: String) -> UInt32 {
+    var hash: UInt32 = 2_166_136_261
+    for byte in string.utf8 {
+        hash ^= UInt32(byte)
+        hash &*= 16_777_619
+    }
+    return hash
+}
+
 // MARK: - TimelineDayView
 
 /// Draggable vertical timeline for a single day's schedule.
@@ -34,7 +44,6 @@ struct TimelineDayView: View {
     @State private var dragOffset: CGFloat = 0   // live drag translation (points)
     @State private var isDragging = false         // finger is actively moving
     @State private var showAddSheet = false
-    @State private var containerWidth: CGFloat = 300
 
     private var totalHeight: CGFloat { CGFloat(visibleEndHour - visibleStartHour) * hourHeight }
     private var visibleStartMin: Int { visibleStartHour * 60 }
@@ -54,37 +63,44 @@ struct TimelineDayView: View {
     // MARK: - Body
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            ScrollView(.vertical, showsIndicators: false) {
-                ZStack(alignment: .topLeading) {
-                    // Invisible sizer
-                    Color.clear.frame(height: totalHeight)
+        GeometryReader { geo in
+            let containerWidth = geo.size.width
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    ZStack(alignment: .topLeading) {
+                        // Invisible sizer
+                        Color.clear.frame(height: totalHeight)
 
-                    // Hour grid lines
-                    ForEach(visibleStartHour..<visibleEndHour, id: \.self) { hour in
-                        hourLine(hour: hour)
+                        // Hour grid lines
+                        ForEach(visibleStartHour..<visibleEndHour, id: \.self) { hour in
+                            hourLine(hour: hour)
+                        }
+
+                        // Red "now" line
+                        currentTimeLine
+
+                        // Availability band sits under visit blocks; dashed preview is drawn above (see below).
+                        dragAvailabilityBand(containerWidth: containerWidth)
+
+                        // Visit blocks — width from enclosing GeometryReader (avoids stale default on first tab appear)
+                        visitLayer(containerWidth: containerWidth)
+
+                        dragDropPreviewOverlay(containerWidth: containerWidth)
                     }
-
-                    // Red "now" line
-                    currentTimeLine
-
-                    // Visit blocks — reads container width from background measurement
-                    visitLayer
+                    .frame(maxWidth: .infinity, minHeight: totalHeight)
+                    // Tap empty area to deselect
+                    .contentShape(Rectangle())
+                    .onTapGesture { exitEditMode() }
                 }
-                .background(widthReader)
-                .frame(minHeight: totalHeight)
-                // Tap empty area to deselect
-                .contentShape(Rectangle())
-                .onTapGesture { exitEditMode() }
-            }
-            // Only disable scroll while finger is actively dragging an event
-            .scrollDisabled(isDragging)
+                // Only disable scroll while finger is actively dragging an event
+                .scrollDisabled(isDragging)
 
-            // FAB: trash when an event is selected, plus otherwise
-            if activeIdx != nil {
-                deleteFAB
-            } else {
-                addFAB
+                // FAB: trash when an event is selected, plus otherwise
+                if activeIdx != nil {
+                    deleteFAB
+                } else {
+                    addFAB
+                }
             }
         }
         .sheet(isPresented: $showAddSheet) {
@@ -97,16 +113,6 @@ struct TimelineDayView: View {
                 onScheduleUpdated(newDay)
                 showAddSheet = false
             }
-        }
-    }
-
-    // MARK: - Width measurement
-
-    private var widthReader: some View {
-        GeometryReader { geo in
-            Color.clear
-                .onAppear { containerWidth = geo.size.width }
-                .onChange(of: geo.size.width) { _, w in containerWidth = w }
         }
     }
 
@@ -160,7 +166,7 @@ struct TimelineDayView: View {
 
     // MARK: - Visit layer
 
-    private var visitLayer: some View {
+    private func visitLayer(containerWidth: CGFloat) -> some View {
         let eventAreaWidth = containerWidth - hourLabelWidth - 8
         let layouts = computeOverlapLayout(day.visits)
 
@@ -180,6 +186,7 @@ struct TimelineDayView: View {
         let yBase = yPos(startMin)
         let lift: CGFloat = (activeIdx == idx && isDragging) ? dragOffset : 0
         let isSelected = activeIdx == idx
+        let isDragSource = activeIdx == idx && isDragging
         let color = clientColor(for: visit.clientId)
 
         // Travel indicator just above this block (dashed line + label)
@@ -209,7 +216,8 @@ struct TimelineDayView: View {
         visitBlock(
             visit: visit, client: clientMap[visit.clientId],
             width: colW, height: blockH,
-            color: color, isSelected: isSelected
+            color: color, isSelected: isSelected,
+            dimmed: isDragSource
         )
         .offset(x: xPos + eventPad / 2, y: yBase + lift)
         .onLongPressGesture(minimumDuration: 0.3) {
@@ -233,41 +241,158 @@ struct TimelineDayView: View {
     }
 
     @ViewBuilder
+    // MARK: - Drag preview & availability
+
+    private func dragAvailabilityBand(containerWidth: CGFloat) -> some View {
+        let eventAreaWidth = containerWidth - hourLabelWidth - 8
+        return Group {
+            if isDragging,
+               let idx = activeIdx,
+               idx < day.visits.count,
+               let client = clientMap[day.visits[idx].clientId] {
+                availabilityBand(for: client, eventAreaWidth: eventAreaWidth)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func dragDropPreviewOverlay(containerWidth: CGFloat) -> some View {
+        let eventAreaWidth = containerWidth - hourLabelWidth - 8
+        return Group {
+            if isDragging,
+               let idx = activeIdx,
+               idx < day.visits.count,
+               let prop = proposedDropForDrag(visitIdx: idx, translationY: dragOffset) {
+                dropPreviewOverlay(
+                    startMin: prop.start,
+                    endMin: prop.end,
+                    isValid: prop.isValid,
+                    eventAreaWidth: eventAreaWidth
+                )
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Resulting start/end if the user releases at this vertical translation (same rules as `commitDrop`).
+    private func proposedDropForDrag(visitIdx: Int, translationY: CGFloat) -> (start: Int, end: Int, isValid: Bool)? {
+        guard visitIdx < day.visits.count else { return nil }
+        let visit = day.visits[visitIdx]
+        guard let client = clientMap[visit.clientId] else { return nil }
+
+        let originalStart = timeToMinutes(visit.startTime)
+        let minutesDelta = Int((translationY / minuteHeight).rounded())
+        let rawStart = originalStart + minutesDelta
+        let snapped = roundToNearestBlock(rawStart)
+
+        let window = getClientWindowForDay(client: client, day: day.day)
+        let whStart = timeToMinutes(worker.workingHours.startTime)
+        let whEnd = timeToMinutes(worker.workingHours.endTime)
+        let windowStart = window.map { timeToMinutes($0.startTime) } ?? whStart
+        let windowEnd = window.map { timeToMinutes($0.endTime) } ?? whEnd
+        let duration = client.visitDurationMinutes
+
+        let clampedStart = max(snapped, windowStart, whStart)
+        let newEnd = clampedStart + duration
+
+        var valid = newEnd <= windowEnd && newEnd <= whEnd
+        if valid {
+            for brk in worker.breaks {
+                let bs = timeToMinutes(brk.startTime)
+                let be = timeToMinutes(brk.endTime)
+                if clampedStart < be && newEnd > bs {
+                    valid = false
+                    break
+                }
+            }
+        }
+        return (clampedStart, newEnd, valid)
+    }
+
+    private func availabilityBand(for client: Client, eventAreaWidth: CGFloat) -> some View {
+        let whStart = timeToMinutes(worker.workingHours.startTime)
+        let whEnd = timeToMinutes(worker.workingHours.endTime)
+        let window = getClientWindowForDay(client: client, day: day.day)
+        let bandStart = window.map { timeToMinutes($0.startTime) } ?? whStart
+        let bandEnd = window.map { timeToMinutes($0.endTime) } ?? whEnd
+        let label = "\(minutesToTime(bandStart).formatted12h) – \(minutesToTime(bandEnd).formatted12h)"
+
+        return ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(Color.green.opacity(0.12))
+            Rectangle()
+                .strokeBorder(Color.green.opacity(0.4), lineWidth: 2)
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Color.green.opacity(0.9))
+                .padding(.horizontal, 4)
+                .padding(.top, 2)
+        }
+        .frame(width: eventAreaWidth, height: max(CGFloat(bandEnd - bandStart) * minuteHeight, 3))
+        .offset(x: hourLabelWidth + 4, y: yPos(bandStart))
+    }
+
+    private func dropPreviewOverlay(startMin: Int, endMin: Int, isValid: Bool, eventAreaWidth: CGFloat) -> some View {
+        let h = max(CGFloat(endMin - startMin) * minuteHeight, 4)
+        let stroke = isValid ? Color.green.opacity(0.75) : Color.red.opacity(0.85)
+        let fill = isValid ? Color.green.opacity(0.12) : Color.red.opacity(0.12)
+
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(fill)
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(stroke, style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
+            Text(minutesToTime(startMin).formatted12h)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(isValid ? Color.green.opacity(0.95) : Color.red)
+                .padding(.horizontal, 4)
+                .padding(.top, 3)
+        }
+        .frame(width: eventAreaWidth - 4, height: h, alignment: .topLeading)
+        .offset(x: hourLabelWidth + 6, y: yPos(startMin))
+    }
+
     private func visitBlock(
         visit: ScheduledVisit,
         client: Client?,
         width: CGFloat,
         height: CGFloat,
         color: Color,
-        isSelected: Bool
+        isSelected: Bool,
+        dimmed: Bool = false
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            // Travel label inside block (if tall enough)
-            if visit.travelTimeFromPrev > 0 && height >= 46 {
-                HStack(spacing: 2) {
-                    Image(systemName: "car.fill")
-                        .font(.system(size: 9))
-                    Text("\(visit.travelTimeFromPrev)m drive")
-                        .font(.system(size: 10))
-                }
-                .foregroundStyle(.white.opacity(0.8))
-            }
-
-            Text(client?.name ?? "Unknown")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .lineLimit(height < 46 ? 1 : 2)
-
-            if height >= 46 {
-                Text("\(visit.startTime.formatted12h) – \(visit.endTime.formatted12h)")
-                    .font(.system(size: 10))
+        HStack(alignment: .top, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                // Travel label inside block (if tall enough)
+                if visit.travelTimeFromPrev > 0 && height >= 46 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "car.fill")
+                            .font(.system(size: 9))
+                        Text("\(visit.travelTimeFromPrev)m drive")
+                            .font(.system(size: 10))
+                    }
                     .foregroundStyle(.white.opacity(0.8))
+                }
+
+                Text(client?.name ?? "Unknown")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(height < 46 ? 1 : 2)
+                    .multilineTextAlignment(.leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("\(visit.startTime.formatted12h) – \(visit.endTime.formatted12h)")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .frame(width: width, height: height, alignment: .topLeading)
-        .background(color.opacity(isSelected ? 0.55 : 0.82))
+        .background(color.opacity(dimmed ? 0.28 : (isSelected ? 0.55 : 0.82)))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .stroke(isSelected ? Color.white : Color.clear, lineWidth: 2)
@@ -454,7 +579,8 @@ struct TimelineDayView: View {
 
     private func clientColor(for id: String) -> Color {
         let palette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .indigo, .cyan]
-        return palette[abs(id.hashValue) % palette.count]
+        let idx = Int(fnv1aHash32(id) % UInt32(palette.count))
+        return palette[idx]
     }
 }
 

@@ -73,11 +73,39 @@ struct Coords: Codable, Equatable {
     var lon: Double
 }
 
-struct TimeWindow: Codable, Identifiable {
-    var id: String { "\(day.rawValue)-\(startTime)-\(endTime)" }
+/// One availability window per calendar day in the workspace JSON (`day` + times only).
+/// A stable `id` is kept for SwiftUI lists and is not encoded — web and API payloads stay unchanged.
+struct TimeWindow: Codable, Identifiable, Equatable {
+    var id: UUID
     var day: DayOfWeek
     var startTime: String  // "HH:MM" 24h
     var endTime: String
+
+    enum CodingKeys: String, CodingKey {
+        case day, startTime, endTime
+    }
+
+    init(id: UUID = UUID(), day: DayOfWeek, startTime: String, endTime: String) {
+        self.id = id
+        self.day = day
+        self.startTime = startTime
+        self.endTime = endTime
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()
+        day = try c.decode(DayOfWeek.self, forKey: .day)
+        startTime = try c.decode(String.self, forKey: .startTime)
+        endTime = try c.decode(String.self, forKey: .endTime)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(day, forKey: .day)
+        try c.encode(startTime, forKey: .startTime)
+        try c.encode(endTime, forKey: .endTime)
+    }
 }
 
 struct Client: Codable, Identifiable {

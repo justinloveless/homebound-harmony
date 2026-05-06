@@ -1,5 +1,4 @@
 import Combine
-import MapKit
 import SwiftUI
 
 // The worker's primary daily view: today's visit list in chronological order,
@@ -170,6 +169,7 @@ struct VisitCard: View {
     let isFirst: Bool
     let now: Date
 
+    @AppStorage(MapsAppPreference.userDefaultsKey) private var preferredMapsAppRaw = MapsAppPreference.appleMaps.rawValue
     @State private var showNotes = false
 
     private var departureTime: Date? {
@@ -266,13 +266,9 @@ struct VisitCard: View {
 
                 // Action buttons
                 Divider()
-                HStack(spacing: 12) {
-                    NavigationButton(icon: "map.fill", label: "Apple Maps") {
-                        openInMaps(address: client.address, appChoice: .apple)
-                    }
-                    NavigationButton(icon: "arrow.triangle.turn.up.right.circle.fill", label: "Google Maps") {
-                        openInMaps(address: client.address, appChoice: .google)
-                    }
+                NavigationButton(icon: "arrow.triangle.turn.up.right.circle.fill", label: "Navigate") {
+                    let app = MapsAppPreference(rawValue: preferredMapsAppRaw) ?? .appleMaps
+                    MapsNavigation.openDrivingDirections(to: client.address, preferredApp: app)
                 }
             }
             .padding()
@@ -339,30 +335,6 @@ struct VisitCard: View {
         case .active:    return Color(.systemBackground)
         case .completed: return Color(.secondarySystemBackground)
         case .upcoming:  return Color(.systemBackground)
-        }
-    }
-
-    // MARK: - Navigation
-
-    private enum MapApp { case apple, google }
-
-    private func openInMaps(address: String, appChoice: MapApp) {
-        let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlStr: String
-        switch appChoice {
-        case .apple:
-            urlStr = "maps://?daddr=\(encoded)"
-        case .google:
-            urlStr = "comgooglemaps://?daddr=\(encoded)&directionsmode=driving"
-        }
-
-        if let url = URL(string: urlStr), UIApplication.shared.canOpenURL(url) {
-            UIApplication.shared.open(url)
-        } else if appChoice == .google,
-                  let fallback = URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(encoded)") {
-            UIApplication.shared.open(fallback)
-        } else if let fallback = URL(string: "maps://?daddr=\(encoded)") {
-            UIApplication.shared.open(fallback)
         }
     }
 

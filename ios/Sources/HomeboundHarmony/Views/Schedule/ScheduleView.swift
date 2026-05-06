@@ -23,7 +23,6 @@ struct ScheduleView: View {
                     emptyState
                 }
             }
-            .navigationTitle("Schedule")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if appState.isSyncing || isSaving {
@@ -49,34 +48,15 @@ struct ScheduleView: View {
     // MARK: - Schedule content
 
     private func scheduleContent(_ schedule: WeekSchedule, worker: WorkerProfile) -> some View {
-        VStack(spacing: 0) {
-            weekSummary(schedule)
-
+        let selectorDays = scheduleDaysForSelector(schedule, worker: worker)
+        return VStack(spacing: 0) {
             if let unmet = schedule.unmetVisits, !unmet.isEmpty {
                 unmetBanner(unmet)
             }
 
-            // Day selector tabs
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(schedule.days) { day in
-                        DayTab(
-                            day: day,
-                            isSelected: selectedDay == day.day,
-                            hasVisits: !day.visits.isEmpty
-                        ) { selectedDay = day.day }
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-            }
-            .background(Color(.secondarySystemBackground))
-
-            Divider()
-
             // Day timeline
-            if let daySchedule = schedule.days.first(where: {
-                $0.day == (selectedDay ?? firstActiveDay(schedule))
+            if let daySchedule = selectorDays.first(where: {
+                $0.day == (selectedDay ?? firstActiveDay(schedule, worker: worker))
             }) {
                 dayHeader(daySchedule)
                 Divider()
@@ -88,10 +68,35 @@ struct ScheduleView: View {
                 ) { updatedDay in
                     save(updatedDay)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+
+            Divider()
+
+            // Day selector: only working days; equal width across the bar
+            HStack(spacing: 0) {
+                ForEach(selectorDays) { day in
+                    DayTab(
+                        day: day,
+                        isSelected: selectedDay == day.day,
+                        hasVisits: !day.visits.isEmpty
+                    ) { selectedDay = day.day }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(.secondarySystemBackground))
         }
         .onAppear {
-            if selectedDay == nil { selectedDay = firstActiveDay(schedule) }
+            if selectedDay == nil { selectedDay = firstActiveDay(schedule, worker: worker) }
+            clampSelectedDay(schedule, worker: worker, visibleDays: selectorDays)
+        }
+        .onChange(of: worker.daysOff) { _, _ in
+            clampSelectedDay(schedule, worker: worker, visibleDays: scheduleDaysForSelector(schedule, worker: worker))
+        }
+        .onChange(of: schedule.weekStartDate) { _, _ in
+            clampSelectedDay(schedule, worker: worker, visibleDays: scheduleDaysForSelector(schedule, worker: worker))
         }
     }
 
@@ -132,29 +137,6 @@ struct ScheduleView: View {
         }
     }
 
-    // MARK: - Week summary
-
-    private func weekSummary(_ schedule: WeekSchedule) -> some View {
-        let workDays = schedule.days.filter { !$0.visits.isEmpty }
-        let totalVisits = schedule.days.reduce(0) { $0 + $1.visits.count }
-        return HStack(spacing: 16) {
-            summaryCell(value: "\(workDays.count)", label: "Work days")
-            summaryCell(value: "\(totalVisits)", label: "Visits")
-            summaryCell(value: formatMinutes(schedule.totalTravelMinutes), label: "Driving")
-            summaryCell(value: formatMinutes(schedule.totalTimeAwayMinutes), label: "Away")
-        }
-        .padding()
-        .background(Color(.systemBackground))
-    }
-
-    private func summaryCell(value: String, label: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.headline)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     // MARK: - Unmet visits warning
 
     private func unmetBanner(_ unmet: [UnmetVisit]) -> some View {
@@ -193,14 +175,24 @@ struct ScheduleView: View {
 
     // MARK: - Helpers
 
-    private func firstActiveDay(_ schedule: WeekSchedule) -> DayOfWeek {
-        schedule.days.first { !$0.visits.isEmpty }?.day ?? schedule.days.first?.day ?? .monday
+    /// Days shown in the schedule tab strip: worker working days only (not in `daysOff`).
+    /// Falls back to all `schedule.days` if that would hide every day (misconfigured profile).
+    private func scheduleDaysForSelector(_ schedule: WeekSchedule, worker: WorkerProfile) -> [DaySchedule] {
+        let off = Set(worker.daysOff)
+        let filtered = schedule.days.filter { !off.contains($0.day) }
+        return filtered.isEmpty ? schedule.days : filtered
     }
 
-    private func formatMinutes(_ mins: Int) -> String {
-        if mins < 60 { return "\(mins)m" }
-        let h = mins / 60, m = mins % 60
-        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
+    private func firstActiveDay(_ schedule: WeekSchedule, worker: WorkerProfile) -> DayOfWeek {
+        let days = scheduleDaysForSelector(schedule, worker: worker)
+        return days.first { !$0.visits.isEmpty }?.day ?? days.first?.day ?? .monday
+    }
+
+    private func clampSelectedDay(_ schedule: WeekSchedule, worker: WorkerProfile, visibleDays: [DaySchedule]) {
+        let visible = Set(visibleDays.map(\.day))
+        if let s = selectedDay, !visible.contains(s) {
+            selectedDay = firstActiveDay(schedule, worker: worker)
+        }
     }
 
     private func formatDate(_ iso: String) -> String {
@@ -231,7 +223,8 @@ struct DayTab: View {
                     .font(.caption2)
                     .foregroundStyle(hasVisits ? .primary : .tertiary)
             }
-            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 6)
             .padding(.vertical, 8)
             .background(isSelected ? Color.blue : Color.clear)
             .foregroundStyle(isSelected ? .white : (hasVisits ? .primary : .secondary))
