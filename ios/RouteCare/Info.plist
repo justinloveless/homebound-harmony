@@ -17,5 +17,7 @@
 	<array>
 		<string>comgooglemaps</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
