@@ -29,6 +29,18 @@ enum MapsNavigation {
         }
     }
 
+    static func directionsURL(to address: String, preferredApp: MapsAppPreference) -> URL? {
+        let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard !encoded.isEmpty else { return nil }
+        switch preferredApp {
+        case .appleMaps:
+            return URL(string: "maps://?daddr=\(encoded)")
+        case .googleMaps:
+            return URL(string: "comgooglemaps://?daddr=\(encoded)&directionsmode=driving")
+                ?? URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(encoded)")
+        }
+    }
+
     private static func openAppleMapsDrivingDirections(to address: String) {
         let geocoder = CLGeocoder()
         geocoder.geocodeAddressString(address) { placemarks, _ in

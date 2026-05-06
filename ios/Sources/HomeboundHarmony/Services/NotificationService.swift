@@ -68,6 +68,41 @@ final class NotificationService {
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
     }
 
+    func scheduleVisitDurationAlarm(
+        clientName: String,
+        dayDate: String,
+        visitIndex: Int,
+        checkInAt: Date,
+        durationMinutes: Int
+    ) async {
+        let center = UNUserNotificationCenter.current()
+        let fireAt = checkInAt.addingTimeInterval(TimeInterval(max(durationMinutes, 1) * 60))
+        guard fireAt > Date() else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Visit time reached"
+        content.body = "\(clientName): planned duration is complete."
+        content.sound = .default
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+
+        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireAt)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: durationAlarmID(scheduleDate: dayDate, visitIndex: visitIndex),
+            content: content,
+            trigger: trigger
+        )
+        try? await center.add(request)
+    }
+
+    func clearVisitDurationAlarm(dayDate: String, visitIndex: Int) {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [durationAlarmID(scheduleDate: dayDate, visitIndex: visitIndex)]
+        )
+    }
+
     // MARK: - Helpers
 
     private func todaySchedule(in schedule: WeekSchedule) -> DaySchedule? {
@@ -86,6 +121,10 @@ final class NotificationService {
         schedule.days.flatMap { day in
             day.visits.indices.map { notificationID(scheduleDate: day.date, visitIndex: $0) }
         }
+    }
+
+    private func durationAlarmID(scheduleDate: String, visitIndex: Int) -> String {
+        "hh-visit-alarm-\(scheduleDate)-\(visitIndex)"
     }
 }
 

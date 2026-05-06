@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import Observation
+import WidgetKit
 
 // MARK: - Auth state machine
 
@@ -18,6 +19,9 @@ enum AppError: LocalizedError {
     case noSalt
     case wrongPassword
     case noWorkspace
+    case noTodaySchedule
+    case noCheckInTarget
+    case cannotCheckInVisit
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +29,9 @@ enum AppError: LocalizedError {
         case .noSalt:         return "Salt not available. Please log in again."
         case .wrongPassword:  return "Incorrect password."
         case .noWorkspace:    return "No workspace data found."
+        case .noTodaySchedule: return "No visits scheduled for today."
+        case .noCheckInTarget: return "No visit is currently active or upcoming."
+        case .cannotCheckInVisit: return "Unable to check in for this visit."
         }
     }
 }
@@ -45,6 +52,9 @@ final class AppState {
     var workspaceVersion: Int = 0
     var isSyncing = false
 
+    /// Bumped when local visit check-in state changes so SwiftUI refreshes (store is not `@Observable`).
+    private(set) var visitRuntimeRevision: Int = 0
+
     // UI feedback
     var errorMessage: String?
     var isLoading = false
@@ -53,6 +63,8 @@ final class AppState {
     let api = APIService()
     let crypto = CryptoService()
     let notifications = NotificationService()
+    let visitRuntimeStore = VisitRuntimeStore()
+    private var checkInEngine: VisitCheckInEngine { VisitCheckInEngine(store: visitRuntimeStore) }
 
     private let keychain = KeychainService()
     /// Sync is stateless; a fresh instance keeps `@Observable` macro compatibility (no `lazy` stored props).
@@ -182,6 +194,8 @@ final class AppState {
         workspaceKey = nil
         workspace    = nil
         keychain.deleteAll()
+        visitRuntimeStore.clear()
+        clearWidgetSnapshot()
         notifications.clearAllReminders()
         authState = .unauthenticated
     }
@@ -196,6 +210,9 @@ final class AppState {
             let (ws, version) = try await sync.pull(key: wk)
             workspaceVersion = version
             if let ws { workspace = ws }
+            visitRuntimeStore.prune(forSchedule: workspace?.lastSchedule)
+            touchVisitRuntimeUI()
+            syncWidgetSnapshot()
             await scheduleNotifications()
         } catch {
             errorMessage = error.localizedDescription
@@ -207,6 +224,9 @@ final class AppState {
         let (ws, version) = try await sync.pull(key: wk)
         workspaceVersion = version
         if let ws { workspace = ws }
+        visitRuntimeStore.prune(forSchedule: workspace?.lastSchedule)
+        touchVisitRuntimeUI()
+        syncWidgetSnapshot()
     }
 
     private func persistWorkspace() async throws {
@@ -217,6 +237,7 @@ final class AppState {
             workspaceVersion = try await sync.push(
                 workspace: ws, key: wk, expectedVersion: workspaceVersion
             )
+            syncWidgetSnapshot()
         } catch SyncError.conflict {
             // Pull the newer version; surface a message.
             errorMessage = "Schedule updated on another device — refreshed."
@@ -265,6 +286,8 @@ final class AppState {
 
         ws.lastSchedule = sched
         workspace = ws
+        visitRuntimeStore.prune(forSchedule: ws.lastSchedule)
+        touchVisitRuntimeUI()
         try await persistWorkspace()
         await scheduleNotifications()
     }
@@ -281,5 +304,164 @@ final class AppState {
     func scheduleNotifications() async {
         guard let ws = workspace, let schedule = ws.lastSchedule else { return }
         await notifications.scheduleForToday(schedule: schedule, clients: ws.clients)
+    }
+
+    func visitRuntimeState(dayDate: String, visitIndex: Int) -> VisitRuntimeState? {
+        visitRuntimeStore.state(for: dayDate, visitIndex: visitIndex)
+    }
+
+    func checkInCurrentOrNextVisit(
+        bypassLocationCheck: Bool = false,
+        allowOutsideRadius: Bool = false
+    ) async throws -> VisitCheckInResult {
+        guard let ws = workspace, let day = todaysSchedule() else { throw AppError.noTodaySchedule }
+        guard let result = try await checkInEngine.checkInCurrentOrNext(
+            day: day,
+            clients: ws.clients,
+            bypassLocationCheck: bypassLocationCheck,
+            allowOutsideRadius: allowOutsideRadius
+        ) else {
+            throw AppError.noCheckInTarget
+        }
+
+        if let client = ws.clients.first(where: { $0.id == result.state.clientId }) {
+            await notifications.scheduleVisitDurationAlarm(
+                clientName: client.name,
+                dayDate: result.dayDate,
+                visitIndex: result.visitIndex,
+                checkInAt: result.state.checkedInAt,
+                durationMinutes: max(client.visitDurationMinutes, 1)
+            )
+        }
+        touchVisitRuntimeUI()
+        syncWidgetSnapshot()
+        WidgetCenter.shared.reloadAllTimelines()
+        return result
+    }
+
+    func checkInWidgetPrimaryAction() async {
+        guard let day = todaysSchedule(),
+              let targetIndex = checkInEngine.firstIncompleteVisitIndex(day: day) else { return }
+
+        if let existing = visitRuntimeStore.state(for: day.date, visitIndex: targetIndex), !existing.isCompleted {
+            completeVisit(dayDate: day.date, visitIndex: targetIndex)
+            return
+        }
+
+        _ = try? await checkInVisit(
+            dayDate: day.date,
+            visitIndex: targetIndex,
+            bypassLocationCheck: true,
+            allowOutsideRadius: true
+        )
+    }
+
+    func checkInVisit(
+        dayDate: String,
+        visitIndex: Int,
+        bypassLocationCheck: Bool = false,
+        allowOutsideRadius: Bool = false
+    ) async throws -> VisitCheckInResult {
+        guard let ws = workspace, let day = todaysSchedule(), day.date == dayDate else {
+            throw AppError.noTodaySchedule
+        }
+        guard let result = try await checkInEngine.checkInVisit(
+            at: visitIndex,
+            day: day,
+            clients: ws.clients,
+            bypassLocationCheck: bypassLocationCheck,
+            allowOutsideRadius: allowOutsideRadius
+        ) else {
+            throw AppError.cannotCheckInVisit
+        }
+
+        if let client = ws.clients.first(where: { $0.id == result.state.clientId }) {
+            await notifications.scheduleVisitDurationAlarm(
+                clientName: client.name,
+                dayDate: result.dayDate,
+                visitIndex: result.visitIndex,
+                checkInAt: result.state.checkedInAt,
+                durationMinutes: max(client.visitDurationMinutes, 1)
+            )
+        }
+        touchVisitRuntimeUI()
+        syncWidgetSnapshot()
+        WidgetCenter.shared.reloadAllTimelines()
+        return result
+    }
+
+    func completeVisit(dayDate: String, visitIndex: Int) {
+        checkInEngine.markVisitCompleted(dayDate: dayDate, visitIndex: visitIndex)
+        notifications.clearVisitDurationAlarm(dayDate: dayDate, visitIndex: visitIndex)
+        touchVisitRuntimeUI()
+        syncWidgetSnapshot()
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    func uncheckInVisit(dayDate: String, visitIndex: Int) {
+        visitRuntimeStore.remove(dayDate: dayDate, visitIndex: visitIndex)
+        notifications.clearVisitDurationAlarm(dayDate: dayDate, visitIndex: visitIndex)
+        touchVisitRuntimeUI()
+        syncWidgetSnapshot()
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    func nextUnstartedVisitForToday() -> (client: Client, dayDate: String, visitIndex: Int)? {
+        guard let ws = workspace, let day = todaysSchedule(),
+              let next = checkInEngine.nextUnstartedVisit(day: day),
+              let client = ws.clients.first(where: { $0.id == next.visit.clientId }) else { return nil }
+        return (client, day.date, next.index)
+    }
+
+    private func todaysSchedule() -> DaySchedule? {
+        guard let schedule = workspace?.lastSchedule else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        let todayStr = fmt.string(from: Date())
+        return schedule.days.first { $0.date == todayStr }
+    }
+
+    private func syncWidgetSnapshot() {
+        guard let ws = workspace, let day = todaysSchedule() else {
+            clearWidgetSnapshot()
+            return
+        }
+        let visits = day.visits.enumerated().map { idx, visit in
+            WidgetWorkspaceSnapshot.WidgetVisit(
+                dayDate: day.date,
+                visitIndex: idx,
+                clientId: visit.clientId,
+                startTime: visit.startTime,
+                endTime: visit.endTime
+            )
+        }
+        let snapshot = WidgetWorkspaceSnapshot(
+            clients: ws.clients.map { client in
+                WidgetWorkspaceSnapshot.WidgetClient(
+                    id: client.id,
+                    name: client.name,
+                    address: client.address,
+                    visitDurationMinutes: client.visitDurationMinutes
+                )
+            },
+            todaysVisits: visits,
+            runtimeStates: visitRuntimeStore.allStates().filter { $0.dayDate == day.date },
+            refreshedAt: Date()
+        )
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        guard let data = try? enc.encode(snapshot) else { return }
+        let defaults = UserDefaults(suiteName: SharedAppGroup.id) ?? .standard
+        defaults.set(data, forKey: SharedStoreKeys.workspaceSnapshot)
+    }
+
+    private func clearWidgetSnapshot() {
+        let defaults = UserDefaults(suiteName: SharedAppGroup.id) ?? .standard
+        defaults.removeObject(forKey: SharedStoreKeys.workspaceSnapshot)
+    }
+
+    private func touchVisitRuntimeUI() {
+        visitRuntimeRevision &+= 1
     }
 }

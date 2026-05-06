@@ -23,6 +23,24 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: appState.authState)
+        .onOpenURL { url in
+            handleDeepLink(url)
+        }
+    }
+
+    private func handleDeepLink(_ url: URL) {
+        guard url.scheme == "routecare", appState.authState == .authenticated else { return }
+        switch url.host {
+        case "checkin":
+            Task { await appState.checkInWidgetPrimaryAction() }
+        case "navigate-next":
+            guard let next = appState.nextUnstartedVisitForToday() else { return }
+            let raw = UserDefaults.standard.string(forKey: MapsAppPreference.userDefaultsKey) ?? MapsAppPreference.appleMaps.rawValue
+            let pref = MapsAppPreference(rawValue: raw) ?? .appleMaps
+            MapsNavigation.openDrivingDirections(to: next.client.address, preferredApp: pref)
+        default:
+            return
+        }
     }
 }
 

@@ -2,8 +2,17 @@ import { db } from '../db/client';
 import { userSessions } from '../db/schema';
 import { eq, lt } from 'drizzle-orm';
 
-const SESSION_ABSOLUTE_MS = 12 * 60 * 60 * 1000;
-const SESSION_IDLE_MS = 30 * 60 * 1000;
+/**
+ * Long-lived sessions for native clients (iOS): stay signed in across restarts until
+ * explicit logout or app uninstall. Cookie `maxAge` must stay in sync so the client
+ * keeps sending the session id for the full server-side lifetime.
+ */
+const TEN_YEARS_MS = Math.floor(10 * 365.25 * 24 * 60 * 60 * 1000);
+
+export const SESSION_ABSOLUTE_MS = TEN_YEARS_MS;
+/** Match absolute cap so brief gaps between app opens do not invalidate the session. */
+export const SESSION_IDLE_MS = TEN_YEARS_MS;
+export const SESSION_COOKIE_MAX_AGE_SEC = Math.floor(TEN_YEARS_MS / 1000);
 
 export function newSessionId(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('hex');

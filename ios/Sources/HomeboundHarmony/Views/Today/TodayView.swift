@@ -74,7 +74,9 @@ struct TodayView: View {
                                 visit: visit,
                                 client: client,
                                 isFirst: idx == 0,
-                                now: now
+                                now: now,
+                                dayDate: day.date,
+                                visitIndex: idx
                             )
                         }
                     }
@@ -164,16 +166,25 @@ struct TodayView: View {
 // MARK: - Visit card
 
 struct VisitCard: View {
+    @Environment(AppState.self) private var appState
     let visit: ScheduledVisit
     let client: Client
     let isFirst: Bool
     let now: Date
+    let dayDate: String
+    let visitIndex: Int
 
     @AppStorage(MapsAppPreference.userDefaultsKey) private var preferredMapsAppRaw = MapsAppPreference.appleMaps.rawValue
     @State private var showNotes = false
+    @State private var checkInError: String?
+    @State private var showOutsideRadiusConfirm = false
+
+    private var runtimeState: VisitRuntimeState? {
+        appState.visitRuntimeState(dayDate: dayDate, visitIndex: visitIndex)
+    }
 
     private var departureTime: Date? {
-        guard let start = visit.startTime.asTimeOn(isoDate: isoDateFromStartTime()) else { return nil }
+        guard let start = visit.startTime.asTimeOn(isoDate: dayDate) else { return nil }
         return start.addingTimeInterval(TimeInterval(-max(0, visit.travelTimeFromPrev) * 60))
     }
 
@@ -185,14 +196,18 @@ struct VisitCard: View {
     }
 
     private var visitStatus: VisitStatus {
-        guard let start = visit.startTime.asTimeOn(isoDate: isoDateFromStartTime()),
-              let end   = visit.endTime.asTimeOn(isoDate: isoDateFromStartTime()) else { return .upcoming }
+        if let state = runtimeState {
+            return state.isCompleted ? .completed : .active
+        }
+        guard let start = visit.startTime.asTimeOn(isoDate: dayDate),
+              let end   = visit.endTime.asTimeOn(isoDate: dayDate) else { return .upcoming }
         if now >= start && now <= end { return .active }
         if now > end { return .completed }
         return .upcoming
     }
 
     var body: some View {
+        let _ = appState.visitRuntimeRevision
         VStack(alignment: .leading, spacing: 0) {
             // Travel indicator between visits
             if visit.travelTimeFromPrev > 0 {
@@ -228,7 +243,7 @@ struct VisitCard: View {
                 }
 
                 // Departure countdown
-                if let mins = minutesToDepart {
+                if runtimeState == nil, let mins = minutesToDepart {
                     HStack(spacing: 4) {
                         Image(systemName: "figure.walk.departure")
                             .font(.caption)
@@ -237,6 +252,22 @@ struct VisitCard: View {
                             .font(.subheadline)
                             .foregroundStyle(mins <= 10 ? .orange : .primary)
                             .fontWeight(mins <= 10 ? .semibold : .regular)
+                    }
+                }
+
+                if let runtimeState {
+                    HStack(spacing: 4) {
+                        Image(systemName: "timer")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                        if runtimeState.isCompleted {
+                            Text("Completed at \(runtimeState.completedAt?.formatted(date: .omitted, time: .shortened) ?? "")")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(remainingDurationText(from: runtimeState.checkedInAt))
+                                .font(.subheadline)
+                        }
                     }
                 }
 
@@ -266,9 +297,45 @@ struct VisitCard: View {
 
                 // Action buttons
                 Divider()
-                NavigationButton(icon: "arrow.triangle.turn.up.right.circle.fill", label: "Navigate") {
-                    let app = MapsAppPreference(rawValue: preferredMapsAppRaw) ?? .appleMaps
-                    MapsNavigation.openDrivingDirections(to: client.address, preferredApp: app)
+                HStack {
+                    NavigationButton(icon: "arrow.triangle.turn.up.right.circle.fill", label: "Navigate") {
+                        let app = MapsAppPreference(rawValue: preferredMapsAppRaw) ?? .appleMaps
+                        MapsNavigation.openDrivingDirections(to: client.address, preferredApp: app)
+                    }
+                    Spacer()
+                    if runtimeState != nil {
+                        Button {
+                            appState.uncheckInVisit(dayDate: dayDate, visitIndex: visitIndex)
+                        } label: {
+                            Text("Un-check In")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color(.tertiarySystemBackground))
+                                .foregroundStyle(.primary)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    Button {
+                        handleCheckInTap()
+                    } label: {
+                        Text(checkInButtonTitle)
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(checkInButtonBackground)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(checkInDisabled)
+                }
+
+                if let checkInError {
+                    Text(checkInError)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
                 }
             }
             .padding()
@@ -278,6 +345,20 @@ struct VisitCard: View {
                 RoundedRectangle(cornerRadius: 14)
                     .stroke(visitStatus == .active ? Color.blue.opacity(0.5) : Color.clear, lineWidth: 2)
             )
+        }
+        .alert("Start visit anyway?", isPresented: $showOutsideRadiusConfirm) {
+            Button("Start Visit", role: .destructive) {
+                Task {
+                    _ = try? await appState.checkInVisit(
+                        dayDate: dayDate,
+                        visitIndex: visitIndex,
+                        allowOutsideRadius: true
+                    )
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You appear to be away from the client location.")
         }
     }
 
@@ -343,11 +424,47 @@ struct VisitCard: View {
         return "Depart in \(mins) min"
     }
 
-    private func isoDateFromStartTime() -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        return fmt.string(from: Date())
+    private var checkInDisabled: Bool {
+        runtimeState?.isCompleted == true
+    }
+
+    private var checkInButtonTitle: String {
+        guard let runtimeState else { return "Check In" }
+        if runtimeState.isCompleted { return "Visit Complete" }
+        return "Complete Visit"
+    }
+
+    private var checkInButtonBackground: Color {
+        guard let runtimeState else { return .blue }
+        return runtimeState.isCompleted ? .green : .orange
+    }
+
+    private func handleCheckInTap() {
+        checkInError = nil
+        if let state = runtimeState, !state.isCompleted {
+            appState.completeVisit(dayDate: dayDate, visitIndex: visitIndex)
+            return
+        }
+        Task {
+            do {
+                _ = try await appState.checkInVisit(dayDate: dayDate, visitIndex: visitIndex)
+            } catch {
+                await MainActor.run {
+                    if error is VisitCheckInError {
+                        showOutsideRadiusConfirm = true
+                    } else {
+                        checkInError = error.localizedDescription
+                    }
+                }
+            }
+        }
+    }
+
+    private func remainingDurationText(from checkInAt: Date) -> String {
+        let end = checkInAt.addingTimeInterval(TimeInterval(max(client.visitDurationMinutes, 1) * 60))
+        let diff = Int(end.timeIntervalSince(now) / 60)
+        if diff <= 0 { return "Planned duration reached" }
+        return "\(diff) min remaining"
     }
 }
 

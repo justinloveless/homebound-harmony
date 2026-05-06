@@ -5,7 +5,7 @@ import { users, workspaceBlobs, auditEvents } from '../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { hashPassword, verifyPassword, encryptTotpSecret, decryptTotpSecret } from '../auth/argon';
 import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/totp';
-import { createSession, deleteSession } from '../auth/session';
+import { createSession, deleteSession, SESSION_COOKIE_MAX_AGE_SEC } from '../auth/session';
 import { requireUser } from '../auth/middleware';
 import { SESSION_COOKIE, SECURE_COOKIES } from '../auth/cookie';
 import { logEvent } from '../services/audit';
@@ -56,7 +56,7 @@ function setCookieSession(c: any, sessionId: string) {
     secure: SECURE_COOKIES,
     sameSite: 'Lax',
     path: '/',
-    maxAge: 12 * 60 * 60,
+    maxAge: SESSION_COOKIE_MAX_AGE_SEC,
   });
 }
 
