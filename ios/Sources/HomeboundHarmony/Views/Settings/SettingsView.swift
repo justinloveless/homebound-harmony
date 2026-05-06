@@ -145,6 +145,7 @@ struct WorkerProfileEditView: View {
     @State private var workStart      = "08:00"
     @State private var workEnd        = "17:00"
     @State private var daysOff        = Set<DayOfWeek>()
+    @State private var makeUpDays     = Set<DayOfWeek>()
     @State private var strategy       = SchedulingStrategy.spread
     @State private var isSaving       = false
     @State private var saveError: String?
@@ -171,16 +172,15 @@ struct WorkerProfileEditView: View {
                     }
                 }
 
-                Section("Days Off") {
+                Section {
+                    Text("Regular: auto-scheduled. Make-up: on your calendar for manual visits only. Off: not working.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     ForEach(DayOfWeek.allCases) { day in
-                        Toggle(day.fullLabel, isOn: Binding(
-                            get: { daysOff.contains(day) },
-                            set: { on in
-                                if on { daysOff.insert(day) }
-                                else  { daysOff.remove(day) }
-                            }
-                        ))
+                        weekdayRow(day)
                     }
+                } header: {
+                    Text("Weekdays")
                 }
 
                 Section("Scheduling Strategy") {
@@ -214,6 +214,49 @@ struct WorkerProfileEditView: View {
         }
     }
 
+    private enum WeekdayKind { case regular, makeup, off }
+
+    private func weekdayKind(_ day: DayOfWeek) -> WeekdayKind {
+        if daysOff.contains(day) { return .off }
+        if makeUpDays.contains(day) { return .makeup }
+        return .regular
+    }
+
+    private func setWeekdayKind(_ day: DayOfWeek, _ kind: WeekdayKind) {
+        switch kind {
+        case .off:
+            daysOff.insert(day)
+            makeUpDays.remove(day)
+        case .makeup:
+            daysOff.remove(day)
+            makeUpDays.insert(day)
+        case .regular:
+            daysOff.remove(day)
+            makeUpDays.remove(day)
+        }
+    }
+
+    @ViewBuilder
+    private func weekdayRow(_ day: DayOfWeek) -> some View {
+        let k = weekdayKind(day)
+        HStack {
+            Text(day.fullLabel)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                Button("Regular") { setWeekdayKind(day, .regular) }
+                    .buttonStyle(.bordered)
+                    .tint(k == .regular ? .blue : .gray)
+                Button("Make-up") { setWeekdayKind(day, .makeup) }
+                    .buttonStyle(.bordered)
+                    .tint(k == .makeup ? .orange : .gray)
+                Button("Off") { setWeekdayKind(day, .off) }
+                    .buttonStyle(.bordered)
+                    .tint(k == .off ? .red : .gray)
+            }
+            .font(.caption2)
+        }
+    }
+
     private func load() {
         guard let w = appState.workspace?.worker else { return }
         name        = w.name
@@ -221,17 +264,21 @@ struct WorkerProfileEditView: View {
         workStart   = w.workingHours.startTime
         workEnd     = w.workingHours.endTime
         daysOff     = Set(w.daysOff)
+        makeUpDays  = Set(w.makeUpDays)
         strategy    = w.schedulingStrategy
     }
 
     private func save() {
         isSaving   = true
         saveError  = nil
+        let orderedMakeUp = DayOfWeek.allCases.filter { makeUpDays.contains($0) }
+        let orderedOff = DayOfWeek.allCases.filter { daysOff.contains($0) }
         let profile = WorkerProfile(
             name:             name,
             homeAddress:      homeAddress,
             workingHours:     WorkerProfile.WorkingHours(startTime: workStart, endTime: workEnd),
-            daysOff:          Array(daysOff),
+            daysOff:          orderedOff,
+            makeUpDays:       orderedMakeUp,
             breaks:           appState.workspace?.worker.breaks ?? [],
             schedulingStrategy: strategy
         )

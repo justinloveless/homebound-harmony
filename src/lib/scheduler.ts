@@ -520,18 +520,21 @@ export function generateWeekSchedule(
   // Exclude clients explicitly removed from the schedule (kept in the roster).
   const clients = allClients.filter(c => !c.excludedFromSchedule);
 
-  const workingDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+  const makeup = worker.makeUpDays ?? [];
+  const schedulingEligibleDays = DAYS_OF_WEEK.filter(
+    d => !worker.daysOff.includes(d) && !makeup.includes(d),
+  );
   const strategy: SchedulingStrategy = worker.schedulingStrategy ?? 'spread';
 
-  // Alternate strategy: split working days into two halves; schedule the first
+  // Alternate strategy: split auto-scheduling days into two halves; schedule the first
   // half normally, then mirror those days onto the matching second-half days.
-  const halfSize = Math.ceil(workingDays.length / 2);
-  const primaryDays = strategy === 'alternate' ? workingDays.slice(0, halfSize) : workingDays;
+  const halfSize = Math.ceil(schedulingEligibleDays.length / 2);
+  const primaryDays = strategy === 'alternate' ? schedulingEligibleDays.slice(0, halfSize) : schedulingEligibleDays;
   const mirrorPairs: Array<{ source: DayOfWeek; target: DayOfWeek }> = [];
   if (strategy === 'alternate') {
     for (let i = 0; i < halfSize; i++) {
-      const target = workingDays[i + halfSize];
-      if (target) mirrorPairs.push({ source: workingDays[i], target });
+      const target = schedulingEligibleDays[i + halfSize];
+      if (target) mirrorPairs.push({ source: schedulingEligibleDays[i], target });
     }
   }
 
@@ -545,9 +548,9 @@ export function generateWeekSchedule(
     visitsNeededMap.set(c.id, primaryNeed);
   }
 
-  const schedulingDays = strategy === 'alternate' ? primaryDays : workingDays;
+  const schedulingDays = strategy === 'alternate' ? primaryDays : schedulingEligibleDays;
 
-  // Edge case: no working days
+  // Edge case: no auto-scheduling days (e.g. all off or all make-up)
   if (schedulingDays.length === 0) {
     const unmetVisits: UnmetVisit[] = clients
       .filter(c => (originalNeeded.get(c.id) ?? 0) > 0)

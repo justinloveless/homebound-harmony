@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Download, Upload, Trash2, Plus, Copy, KeyRound } from 'lucide-react';
 import { DAYS_OF_WEEK, DAY_LABELS, STRATEGY_LABELS, type DayOfWeek, type WorkerProfile, type SchedulingStrategy } from '@/types/models';
@@ -26,13 +25,28 @@ export default function SettingsPage() {
     toast.success('Profile saved');
   };
 
-  const toggleDay = (day: DayOfWeek) => {
-    setForm(prev => ({
-      ...prev,
-      daysOff: prev.daysOff.includes(day)
-        ? prev.daysOff.filter(d => d !== day)
-        : [...prev.daysOff, day],
-    }));
+  type DayKind = 'regular' | 'makeup' | 'off';
+  const dayKind = (w: WorkerProfile, d: DayOfWeek): DayKind => {
+    if (w.daysOff.includes(d)) return 'off';
+    if ((w.makeUpDays ?? []).includes(d)) return 'makeup';
+    return 'regular';
+  };
+  const setDayKind = (day: DayOfWeek, kind: DayKind) => {
+    setForm(prev => {
+      let daysOff = [...prev.daysOff];
+      let makeUpDays = [...(prev.makeUpDays ?? [])];
+      if (kind === 'off') {
+        if (!daysOff.includes(day)) daysOff.push(day);
+        makeUpDays = makeUpDays.filter(x => x !== day);
+      } else if (kind === 'makeup') {
+        daysOff = daysOff.filter(x => x !== day);
+        if (!makeUpDays.includes(day)) makeUpDays.push(day);
+      } else {
+        daysOff = daysOff.filter(x => x !== day);
+        makeUpDays = makeUpDays.filter(x => x !== day);
+      }
+      return { ...prev, daysOff, makeUpDays };
+    });
   };
 
   const addBreak = () => {
@@ -122,14 +136,30 @@ export default function SettingsPage() {
           </div>
 
           <div>
-            <Label className="mb-2 block">Days Off</Label>
-            <div className="flex flex-wrap gap-3">
-              {DAYS_OF_WEEK.map(day => (
-                <label key={day} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={form.daysOff.includes(day)} onCheckedChange={() => toggleDay(day)} />
-                  {DAY_LABELS[day]}
-                </label>
-              ))}
+            <Label className="mb-2 block">Weekdays</Label>
+            <p className="text-xs text-muted-foreground mb-3">
+              Regular days are used for automatic scheduling. Make-up days stay on your calendar for manual visits only (make-ups, evaluations). Off means you do not work that day.
+            </p>
+            <div className="space-y-2">
+              {DAYS_OF_WEEK.map(day => {
+                const k = dayKind(form, day);
+                return (
+                  <div key={day} className="flex items-center justify-between gap-2 flex-wrap border rounded-md px-3 py-2">
+                    <span className="text-sm font-medium w-12">{DAY_LABELS[day]}</span>
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" variant={k === 'regular' ? 'default' : 'outline'} className="h-8 text-xs" onClick={() => setDayKind(day, 'regular')}>
+                        Regular
+                      </Button>
+                      <Button type="button" size="sm" variant={k === 'makeup' ? 'secondary' : 'outline'} className="h-8 text-xs" onClick={() => setDayKind(day, 'makeup')}>
+                        Make-up
+                      </Button>
+                      <Button type="button" size="sm" variant={k === 'off' ? 'destructive' : 'outline'} className="h-8 text-xs" onClick={() => setDayKind(day, 'off')}>
+                        Off
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

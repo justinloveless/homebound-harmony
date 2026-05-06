@@ -12,6 +12,7 @@ const { setScheduleMock, workspaceFixture } = vi.hoisted(() => ({
       homeAddress: '100 Home St',
       workingHours: { startTime: '08:00', endTime: '17:00' },
       daysOff: ['saturday', 'sunday'],
+      makeUpDays: [],
       breaks: [],
       schedulingStrategy: 'spread',
     },

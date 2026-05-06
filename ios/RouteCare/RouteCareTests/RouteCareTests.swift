@@ -100,6 +100,33 @@ struct RouteCareTests {
         #expect(schedule.unmetVisits == nil)
     }
 
+    @Test func generateWeekScheduleSkipsMakeUpDays() async throws {
+        let worker = WorkerProfile(
+            name: "Care Worker",
+            homeAddress: "100 Main St",
+            homeCoords: nil,
+            workingHours: WorkerProfile.WorkingHours(startTime: "08:00", endTime: "17:00"),
+            daysOff: [.saturday, .sunday],
+            makeUpDays: [.monday],
+            breaks: [],
+            schedulingStrategy: .spread
+        )
+        let client = makeClient(
+            id: "c1",
+            timeWindows: [
+                TimeWindow(day: .monday, startTime: "09:00", endTime: "12:00")
+            ]
+        )
+        let schedule = generateWeekSchedule(
+            worker: worker,
+            allClients: [client],
+            travelTimes: [:],
+            weekStartDate: "2026-05-04"
+        )
+        #expect(!schedule.days.contains { $0.day == .monday })
+        #expect(schedule.unmetVisits?.contains { $0.clientId == "c1" } == true)
+    }
+
     @Test func generateWeekScheduleIgnoresExcludedClients() async throws {
         let worker = makeWorker()
         let included = makeClient(

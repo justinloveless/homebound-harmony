@@ -24,8 +24,8 @@ function getDB() {
   return dbPromise;
 }
 
-/** Migrate legacy clients with frequency field to new visitsPerPeriod format */
-function migrateWorkspace(ws: Workspace): Workspace {
+/** Migrate legacy workspace JSON (new fields, defaults). */
+export function migrateWorkspace(ws: Workspace): Workspace {
   const clients = ws.clients.map(c => {
     if (c.visitsPerPeriod != null && c.period != null) return c;
     const freq = (c as any).frequency;
@@ -35,10 +35,11 @@ function migrateWorkspace(ws: Workspace): Workspace {
     }
     return { ...c, visitsPerPeriod: 1, period: 'week' as const };
   });
-  const worker = ws.worker;
-  if (!worker.schedulingStrategy) {
-    worker.schedulingStrategy = 'spread';
-  }
+  const worker = {
+    ...ws.worker,
+    makeUpDays: ws.worker.makeUpDays ?? [],
+    schedulingStrategy: ws.worker.schedulingStrategy ?? 'spread',
+  };
   return { ...ws, clients, worker };
 }
 

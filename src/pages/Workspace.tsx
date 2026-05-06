@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { DAY_LABELS, DAYS_OF_WEEK, type DayOfWeek } from '@/types/models';
+import { DAY_LABELS, DAYS_OF_WEEK, type DayOfWeek, type WorkerProfile } from '@/types/models';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,30 @@ import { formatTime } from '@/lib/format-time';
 import { toast } from 'sonner';
 import Clients from './Clients';
 import Schedule from './Schedule';
+
+type DayKind = 'regular' | 'makeup' | 'off';
+
+function dayKind(w: Pick<WorkerProfile, 'daysOff' | 'makeUpDays'>, d: DayOfWeek): DayKind {
+  if (w.daysOff.includes(d)) return 'off';
+  if ((w.makeUpDays ?? []).includes(d)) return 'makeup';
+  return 'regular';
+}
+
+function setDayKind(prev: WorkerProfile, day: DayOfWeek, kind: DayKind): WorkerProfile {
+  let daysOff = [...prev.daysOff];
+  let makeUpDays = [...(prev.makeUpDays ?? [])];
+  if (kind === 'off') {
+    if (!daysOff.includes(day)) daysOff.push(day);
+    makeUpDays = makeUpDays.filter(x => x !== day);
+  } else if (kind === 'makeup') {
+    daysOff = daysOff.filter(x => x !== day);
+    if (!makeUpDays.includes(day)) makeUpDays.push(day);
+  } else {
+    daysOff = daysOff.filter(x => x !== day);
+    makeUpDays = makeUpDays.filter(x => x !== day);
+  }
+  return { ...prev, daysOff, makeUpDays };
+}
 
 function WorkerAvailability() {
   const { workspace, updateWorker } = useWorkspace();
@@ -21,18 +45,6 @@ function WorkerAvailability() {
   useEffect(() => {
     if (!editing) setForm(worker);
   }, [worker, editing]);
-
-  const workingDays = DAYS_OF_WEEK.filter(d => !form.daysOff.includes(d));
-
-  const toggleDay = (day: DayOfWeek) => {
-    setForm(prev => ({
-      ...prev,
-      daysOff: prev.daysOff.includes(day)
-        ? prev.daysOff.filter(d => d !== day)
-        : [...prev.daysOff, day],
-    }));
-  };
-
 
   const handleSave = () => {
     updateWorker(form);
@@ -65,20 +77,27 @@ function WorkerAvailability() {
             <span className="text-muted-foreground">Hours:</span>
             <span className="font-medium">{formatTime(worker.workingHours.startTime)} – {formatTime(worker.workingHours.endTime)}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-muted-foreground">Days:</span>
-            <div className="flex gap-1 flex-wrap">
-              {DAYS_OF_WEEK.map(d => (
-                <Badge
-                  key={d}
-                  variant={!worker.daysOff.includes(d) ? 'default' : 'outline'}
-                  className={`text-[10px] px-1.5 py-0 ${!worker.daysOff.includes(d) ? '' : 'opacity-40'}`}
-                >
-                  {DAY_LABELS[d]}
-                </Badge>
-              ))}
+          <div className="space-y-1.5 text-sm">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Weekdays:</span>
             </div>
+            <div className="flex gap-1 flex-wrap">
+              {DAYS_OF_WEEK.map(d => {
+                const k = dayKind(worker, d);
+                return (
+                  <Badge
+                    key={d}
+                    variant={k === 'off' ? 'outline' : k === 'makeup' ? 'secondary' : 'default'}
+                    className={`text-[10px] px-1.5 py-0 ${k === 'off' ? 'opacity-40' : ''}`}
+                    title={k === 'makeup' ? 'Make-up day (manual visits only)' : k === 'off' ? 'Day off' : 'Regular scheduling'}
+                  >
+                    {DAY_LABELS[d]}{k === 'makeup' ? '·MU' : ''}
+                  </Badge>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground">MU = make-up (kept open for manual visits, not auto-scheduled)</p>
           </div>
         </CardContent>
       </Card>
@@ -118,22 +137,52 @@ function WorkerAvailability() {
           </div>
         </div>
 
-        {/* Working days */}
+        {/* Per-day: regular / make-up / off */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-            <CalendarDays className="h-3.5 w-3.5" /> Working Days
+            <CalendarDays className="h-3.5 w-3.5" /> Weekdays
           </label>
-          <div className="flex gap-1.5 flex-wrap">
-            {DAYS_OF_WEEK.map(d => (
-              <Badge
-                key={d}
-                variant={workingDays.includes(d) ? 'default' : 'outline'}
-                className={`text-[10px] px-2 py-0.5 cursor-pointer select-none transition-opacity ${workingDays.includes(d) ? '' : 'opacity-40'}`}
-                onClick={() => toggleDay(d)}
-              >
-                {DAY_LABELS[d]}
-              </Badge>
-            ))}
+          <p className="text-[10px] text-muted-foreground mb-2">
+            Regular = auto-scheduling. Make-up = on calendar for manual visits only. Off = not working.
+          </p>
+          <div className="space-y-2">
+            {DAYS_OF_WEEK.map(d => {
+              const k = dayKind(form, d);
+              return (
+                <div key={d} className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs font-medium w-8">{DAY_LABELS[d]}</span>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={k === 'regular' ? 'default' : 'outline'}
+                      className="h-7 px-2 text-[10px]"
+                      onClick={() => setForm(prev => setDayKind(prev, d, 'regular'))}
+                    >
+                      Regular
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={k === 'makeup' ? 'secondary' : 'outline'}
+                      className="h-7 px-2 text-[10px]"
+                      onClick={() => setForm(prev => setDayKind(prev, d, 'makeup'))}
+                    >
+                      Make-up
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={k === 'off' ? 'destructive' : 'outline'}
+                      className="h-7 px-2 text-[10px]"
+                      onClick={() => setForm(prev => setDayKind(prev, d, 'off'))}
+                    >
+                      Off
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </CardContent>

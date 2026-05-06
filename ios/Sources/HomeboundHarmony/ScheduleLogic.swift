@@ -538,15 +538,15 @@ func generateWeekSchedule(
     weekIndex: Int = 0
 ) -> WeekSchedule {
     let clients = allClients.filter { !$0.isExcluded }
-    let workingDays = DayOfWeek.allCases.filter { !worker.daysOff.contains($0) }
+    let schedulingEligibleDays = worker.autoSchedulingDays
     let strategy = worker.schedulingStrategy
-    let halfSize = Int(ceil(Double(workingDays.count) / 2.0))
-    let primaryDays = strategy == .alternate ? Array(workingDays.prefix(halfSize)) : workingDays
+    let halfSize = Int(ceil(Double(schedulingEligibleDays.count) / 2.0))
+    let primaryDays = strategy == .alternate ? Array(schedulingEligibleDays.prefix(halfSize)) : schedulingEligibleDays
 
     var mirrorPairs: [(source: DayOfWeek, target: DayOfWeek)] = []
     if strategy == .alternate {
-        for index in 0..<halfSize where index + halfSize < workingDays.count {
-            mirrorPairs.append((workingDays[index], workingDays[index + halfSize]))
+        for index in 0..<halfSize where index + halfSize < schedulingEligibleDays.count {
+            mirrorPairs.append((schedulingEligibleDays[index], schedulingEligibleDays[index + halfSize]))
         }
     }
 
@@ -558,7 +558,7 @@ func generateWeekSchedule(
         visitsNeeded[client.id] = strategy == .alternate ? Int(ceil(Double(needed) / 2.0)) : needed
     }
 
-    let schedulingDays = strategy == .alternate ? primaryDays : workingDays
+    let schedulingDays = strategy == .alternate ? primaryDays : schedulingEligibleDays
     if schedulingDays.isEmpty {
         let unmetVisits = clients
             .filter { (originalNeeded[$0.id] ?? 0) > 0 }

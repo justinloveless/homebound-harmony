@@ -67,8 +67,21 @@ export interface WorkerProfile {
   homeCoords?: Coords;
   workingHours: { startTime: string; endTime: string };
   daysOff: DayOfWeek[];
+  /** Weekdays kept open for manual visits (make-ups, evals); excluded from auto scheduling. Not days off. */
+  makeUpDays: DayOfWeek[];
   breaks: { startTime: string; endTime: string; label: string }[];
   schedulingStrategy: SchedulingStrategy;
+}
+
+/** Days shown in calendar / manual editing: not marked as days off. */
+export function visibleCalendarDays(worker: WorkerProfile): DayOfWeek[] {
+  return DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+}
+
+/** Days used for automatic visit placement: working and not make-up. */
+export function autoSchedulingDays(worker: WorkerProfile): DayOfWeek[] {
+  const makeup = worker.makeUpDays ?? [];
+  return DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d) && !makeup.includes(d));
 }
 
 
@@ -144,6 +157,7 @@ export const DEFAULT_WORKSPACE: Workspace = {
     homeAddress: '',
     workingHours: { startTime: '08:00', endTime: '17:00' },
     daysOff: ['saturday', 'sunday'],
+    makeUpDays: [],
     breaks: [{ startTime: '12:00', endTime: '13:00', label: 'Lunch' }],
     schedulingStrategy: 'spread',
   },

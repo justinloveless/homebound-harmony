@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { generateWeekSchedule, recalcDaySchedule } from '@/lib/scheduler';
-import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, type DayOfWeek, type WeekSchedule, type DaySchedule, type ScheduledVisit, type SavedSchedule } from '@/types/models';
+import { DAY_LABELS, DAYS_OF_WEEK, PERIOD_LABELS, visibleCalendarDays, autoSchedulingDays, type DayOfWeek, type WeekSchedule, type DaySchedule, type ScheduledVisit, type SavedSchedule } from '@/types/models';
 import { CalendarDays, Clock, MapPin, RotateCw, CheckCircle2, AlertCircle, ArrowUp, ArrowDown, Trash2, Plus, Loader2, Save, FolderOpen, X, Eye, Pencil, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import RouteMap from '@/components/RouteMap';
@@ -53,6 +53,15 @@ export default function Schedule() {
   const { workspace, setSchedule, saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule, updateClient } = useWorkspace();
   const { worker, clients, travelTimes, lastSchedule } = workspace;
   const savedSchedules = workspace.savedSchedules ?? [];
+  const visibleCalendarDayList = useMemo(
+    () => visibleCalendarDays(worker),
+    [worker],
+  );
+  const autoSchedulingDayList = useMemo(
+    () => autoSchedulingDays(worker),
+    [worker],
+  );
+  const makeupSet = useMemo(() => new Set(worker.makeUpDays ?? []), [worker]);
   const [selectedDay, setSelectedDay] = useState<DayOfWeek | null>(null);
   const [refining, setRefining] = useState(false);
   const [refineProgress, setRefineProgress] = useState('');
@@ -394,7 +403,7 @@ export default function Schedule() {
 
   const handleCreateBlank = () => {
     const weekStart = getMonday();
-    const workDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+    const workDays = visibleCalendarDays(worker);
     const days: DaySchedule[] = workDays.map((day, i) => {
       const dateObj = new Date(weekStart);
       dateObj.setDate(dateObj.getDate() + DAYS_OF_WEEK.indexOf(day));
@@ -1038,8 +1047,8 @@ export default function Schedule() {
               const endHour = Math.min(24, whEnd[0] + 2);
               const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
 
-              // Only show working days
-              const workingDays = DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d));
+              // Show all non-off days (includes make-up days for manual visits)
+              const workingDays = visibleCalendarDayList;
 
               const VISIBLE_HOURS = endHour - startHour;
               const ZOOMED_HEIGHT = VISIBLE_HOURS * HOUR_HEIGHT;
@@ -1090,8 +1099,11 @@ export default function Schedule() {
                         >
                           {/* Day header (sticky) */}
                           <div className="sticky top-0 z-10 text-center py-1 border-b text-xs font-semibold bg-card">
-                            <div className="flex items-center justify-center gap-1">
+                            <div className="flex items-center justify-center gap-1 flex-wrap">
                               <span>{DAY_LABELS[day]}</span>
+                              {makeupSet.has(day) && (
+                                <Badge variant="secondary" className="text-[8px] px-1 py-0 h-4 font-normal">Make-up</Badge>
+                              )}
                               {daySchedule && daySchedule.visits.length > 0 && (
                                 <div className="relative">
                                   <button
@@ -1106,7 +1118,7 @@ export default function Schedule() {
                                       <div className="fixed inset-0 z-20" onClick={() => setCopyMenuDay(null)} />
                                       <div className="absolute top-full left-1/2 -translate-x-1/2 z-30 mt-1 bg-popover border rounded-md shadow-md py-1 min-w-[100px]">
                                         <p className="text-[9px] text-muted-foreground px-2 pb-1">Copy to:</p>
-                                        {DAYS_OF_WEEK.filter(d => d !== day && !worker.daysOff.includes(d)).map(d => (
+                                        {visibleCalendarDayList.filter(d => d !== day).map(d => (
                                           <button
                                             key={d}
                                             aria-label={`Copy to ${DAY_LABELS[d]}`}
@@ -1390,8 +1402,8 @@ export default function Schedule() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).map(d => (
-                            <SelectItem key={d} value={d} className="text-xs">{DAY_LABELS[d]}</SelectItem>
+                          {visibleCalendarDayList.map(d => (
+                            <SelectItem key={d} value={d} className="text-xs">{DAY_LABELS[d]}{makeupSet.has(d) ? ' (make-up)' : ''}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1473,7 +1485,11 @@ export default function Schedule() {
               </CardContent>
             </Card>
 
-            {lastSchedule.clientGroups && Object.keys(lastSchedule.clientGroups).length > 0 && (
+            {lastSchedule.clientGroups && Object.keys(lastSchedule.clientGroups).length > 0 && (() => {
+              const halfAlt = Math.ceil(autoSchedulingDayList.length / 2);
+              const groupADays = autoSchedulingDayList.slice(0, halfAlt);
+              const groupBDays = autoSchedulingDayList.slice(halfAlt);
+              return (
               <Card>
                 <CardContent className="pt-5">
                   <p className="text-xs font-medium text-muted-foreground mb-2">Scheduling Groups</p>
@@ -1481,19 +1497,20 @@ export default function Schedule() {
                     <div className="flex items-center gap-1.5">
                       <span className="w-5 h-5 rounded bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold">A</span>
                       <span className="text-muted-foreground">
-                        {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).filter((_, i) => i % 2 === 0).map(d => DAY_LABELS[d]).join(', ')}
+                        {groupADays.map(d => DAY_LABELS[d]).join(', ') || '—'}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="w-5 h-5 rounded bg-secondary/30 text-secondary-foreground flex items-center justify-center text-[10px] font-bold">B</span>
                       <span className="text-muted-foreground">
-                        {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).filter((_, i) => i % 2 === 1).map(d => DAY_LABELS[d]).join(', ')}
+                        {groupBDays.map(d => DAY_LABELS[d]).join(', ') || '—'}
                       </span>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-            )}
+              );
+            })()}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Card>
@@ -1558,13 +1575,15 @@ export default function Schedule() {
 
           <TabsContent value="daily" className="space-y-4 mt-4">
             <div className="flex gap-2 flex-wrap">
-              {DAYS_OF_WEEK.filter(d => !worker.daysOff.includes(d)).map(day => {
+              {visibleCalendarDayList.map(day => {
                 const dayData = lastSchedule.days.find(d => d.day === day);
                 const visitCount = dayData?.visits.length ?? 0;
                 return (
                   <Button key={day} variant={selectedDay === day ? 'default' : 'outline'} size="sm"
                     onClick={() => { setSelectedDay(day); setHoveredVisitIndex(null); }}>
-                    {DAY_LABELS[day]} {visitCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{visitCount}</Badge>}
+                    {DAY_LABELS[day]}
+                    {makeupSet.has(day) && <span className="ml-0.5 text-[9px] opacity-80">(MU)</span>}
+                    {visitCount > 0 && <Badge variant="secondary" className="ml-1 text-[10px] px-1 py-0">{visitCount}</Badge>}
                   </Button>
                 );
               })}
@@ -1594,7 +1613,7 @@ export default function Schedule() {
                             <div className="fixed inset-0 z-20" onClick={() => setCopyMenuDay(null)} />
                             <div className="absolute right-0 top-full z-30 mt-1 bg-popover border rounded-md shadow-md py-1 min-w-[120px]">
                               <p className="text-[9px] text-muted-foreground px-2 pb-1">Copy to:</p>
-                              {DAYS_OF_WEEK.filter(d => d !== selectedDaySchedule.day && !worker.daysOff.includes(d)).map(d => (
+                              {visibleCalendarDayList.filter(d => d !== selectedDaySchedule.day).map(d => (
                                 <button
                                   key={d}
                                   aria-label={`Copy to ${DAY_LABELS[d]}`}

@@ -71,7 +71,7 @@ struct ScheduleView: View {
             if let daySchedule = selectorDays.first(where: {
                 $0.day == (selectedDay ?? firstActiveDay(schedule, worker: worker))
             }) {
-                dayHeader(daySchedule, selectorDays: selectorDays)
+                dayHeader(daySchedule, selectorDays: selectorDays, worker: worker)
                 Divider()
                 TimelineDayView(
                     day: daySchedule,
@@ -89,7 +89,8 @@ struct ScheduleView: View {
             // Day selector: only working days; equal width across the bar
             daySelectorBar(
                 selectorDays: selectorDays,
-                effectiveSelected: selectedDay ?? firstActiveDay(schedule, worker: worker)
+                effectiveSelected: selectedDay ?? firstActiveDay(schedule, worker: worker),
+                makeupDays: Set(worker.makeUpDays)
             )
         }
         .onAppear {
@@ -99,17 +100,21 @@ struct ScheduleView: View {
         .onChange(of: worker.daysOff) { _, _ in
             clampSelectedDay(schedule, worker: worker, visibleDays: scheduleDaysForSelector(schedule, worker: worker))
         }
+        .onChange(of: worker.makeUpDays) { _, _ in
+            clampSelectedDay(schedule, worker: worker, visibleDays: scheduleDaysForSelector(schedule, worker: worker))
+        }
         .onChange(of: schedule.weekStartDate) { _, _ in
             clampSelectedDay(schedule, worker: worker, visibleDays: scheduleDaysForSelector(schedule, worker: worker))
         }
     }
 
     @ViewBuilder
-    private func daySelectorBar(selectorDays: [DaySchedule], effectiveSelected: DayOfWeek) -> some View {
+    private func daySelectorBar(selectorDays: [DaySchedule], effectiveSelected: DayOfWeek, makeupDays: Set<DayOfWeek>) -> some View {
         if #available(iOS 26.0, *) {
             GlassDaySelectorBar(
                 days: selectorDays,
                 selectedDay: effectiveSelected,
+                makeupDays: makeupDays,
                 namespace: dayPickerGlassNS
             ) { selectedDay = $0 }
         } else {
@@ -118,7 +123,8 @@ struct ScheduleView: View {
                     DayTab(
                         day: day,
                         isSelected: effectiveSelected == day.day,
-                        hasVisits: !day.visits.isEmpty
+                        hasVisits: !day.visits.isEmpty,
+                        isMakeUp: makeupDays.contains(day.day)
                     ) {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             selectedDay = day.day
@@ -135,11 +141,22 @@ struct ScheduleView: View {
 
     // MARK: - Day header
 
-    private func dayHeader(_ day: DaySchedule, selectorDays: [DaySchedule]) -> some View {
+    private func dayHeader(_ day: DaySchedule, selectorDays: [DaySchedule], worker: WorkerProfile) -> some View {
+        let isMakeUp = worker.makeUpDays.contains(day.day)
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(formatDate(day.date))
-                    .font(.subheadline.weight(.medium))
+                HStack(spacing: 6) {
+                    Text(formatDate(day.date))
+                        .font(.subheadline.weight(.medium))
+                    if isMakeUp {
+                        Text("Make-up")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.secondary.opacity(0.35))
+                            .clipShape(Capsule())
+                    }
+                }
                 HStack(spacing: 12) {
                     Label("Depart \(day.leaveHomeTime.formatted12h)", systemImage: "house.fill")
                     Label("Return \(day.arriveHomeTime.formatted12h)", systemImage: "house.fill")
@@ -273,17 +290,15 @@ struct ScheduleView: View {
 
     // MARK: - Helpers
 
-    /// Days shown in the schedule tab strip: every worker working day for this week (not in `daysOff`).
+    /// Days shown in the schedule tab strip: every non-off day (includes make-up weekdays for manual visits).
     ///
     /// `lastSchedule.days` from the server only includes days that had visits when the schedule was built.
     /// If a day was a day off then, it has no row — when the worker later marks that day as working, we still
     /// need a tab and timeline, so missing working days get a placeholder `DaySchedule` until edits persist.
     private func scheduleDaysForSelector(_ schedule: WeekSchedule, worker: WorkerProfile) -> [DaySchedule] {
-        let off = Set(worker.daysOff)
         let byDay = Dictionary(uniqueKeysWithValues: schedule.days.map { ($0.day, $0) })
         var out: [DaySchedule] = []
-        for day in DayOfWeek.allCases {
-            guard !off.contains(day) else { continue }
+        for day in worker.visibleCalendarDays {
             if let existing = byDay[day] {
                 out.append(existing)
             } else if let iso = isoDateInWeek(weekStart: schedule.weekStartDate, day: day) {
@@ -345,13 +360,24 @@ struct DayTab: View {
     let day: DaySchedule
     let isSelected: Bool
     let hasVisits: Bool
+    var isMakeUp: Bool = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 2) {
-                Text(day.day.label)
-                    .font(.caption.weight(.semibold))
+                HStack(spacing: 2) {
+                    Text(day.day.label)
+                        .font(.caption.weight(.semibold))
+                    if isMakeUp {
+                        Text("MU")
+                            .font(.system(size: 8, weight: .bold))
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.25))
+                            .clipShape(Capsule())
+                    }
+                }
                 Text("\(day.visits.count)")
                     .font(.caption2)
                     .foregroundStyle(hasVisits ? .primary : .tertiary)
@@ -373,6 +399,7 @@ struct DayTab: View {
 private struct GlassDaySelectorBar: View {
     let days: [DaySchedule]
     var selectedDay: DayOfWeek
+    var makeupDays: Set<DayOfWeek>
     var namespace: Namespace.ID
     var onSelect: (DayOfWeek) -> Void
 
@@ -380,14 +407,25 @@ private struct GlassDaySelectorBar: View {
         HStack(spacing: 0) {
             ForEach(days) { day in
                 let isSelected = selectedDay == day.day
+                let isMakeUp = makeupDays.contains(day.day)
                 Button {
                     withAnimation(.smooth(duration: 0.35)) {
                         onSelect(day.day)
                     }
                 } label: {
                     VStack(spacing: 2) {
-                        Text(day.day.label)
-                            .font(.caption.weight(.semibold))
+                        HStack(spacing: 2) {
+                            Text(day.day.label)
+                                .font(.caption.weight(.semibold))
+                            if isMakeUp {
+                                Text("MU")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .padding(.horizontal, 3)
+                                    .padding(.vertical, 1)
+                                    .background(Color.orange.opacity(0.25))
+                                    .clipShape(Capsule())
+                            }
+                        }
                         Text("\(day.visits.count)")
                             .font(.caption2)
                             .foregroundStyle(day.visits.isEmpty ? .tertiary : .primary)

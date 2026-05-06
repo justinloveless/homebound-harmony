@@ -130,6 +130,8 @@ struct WorkerProfile: Codable {
     var homeCoords: Coords?
     var workingHours: WorkingHours
     var daysOff: [DayOfWeek]
+    /// Weekdays for manual-only visits; excluded from `generateWeekSchedule`.
+    var makeUpDays: [DayOfWeek]
     var breaks: [WorkBreak]
     var schedulingStrategy: SchedulingStrategy
 
@@ -143,6 +145,65 @@ struct WorkerProfile: Codable {
         var endTime: String
         var label: String
         var id: String { "\(startTime)-\(endTime)-\(label)" }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, homeAddress, homeCoords, workingHours, daysOff, makeUpDays, breaks, schedulingStrategy
+    }
+
+    init(
+        name: String,
+        homeAddress: String,
+        homeCoords: Coords? = nil,
+        workingHours: WorkingHours,
+        daysOff: [DayOfWeek],
+        makeUpDays: [DayOfWeek] = [],
+        breaks: [WorkBreak],
+        schedulingStrategy: SchedulingStrategy
+    ) {
+        self.name = name
+        self.homeAddress = homeAddress
+        self.homeCoords = homeCoords
+        self.workingHours = workingHours
+        self.daysOff = daysOff
+        self.makeUpDays = makeUpDays
+        self.breaks = breaks
+        self.schedulingStrategy = schedulingStrategy
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        homeAddress = try c.decode(String.self, forKey: .homeAddress)
+        homeCoords = try c.decodeIfPresent(Coords.self, forKey: .homeCoords)
+        workingHours = try c.decode(WorkingHours.self, forKey: .workingHours)
+        daysOff = try c.decode([DayOfWeek].self, forKey: .daysOff)
+        makeUpDays = try c.decodeIfPresent([DayOfWeek].self, forKey: .makeUpDays) ?? []
+        breaks = try c.decode([WorkBreak].self, forKey: .breaks)
+        schedulingStrategy = try c.decode(SchedulingStrategy.self, forKey: .schedulingStrategy)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(homeAddress, forKey: .homeAddress)
+        try c.encodeIfPresent(homeCoords, forKey: .homeCoords)
+        try c.encode(workingHours, forKey: .workingHours)
+        try c.encode(daysOff, forKey: .daysOff)
+        try c.encode(makeUpDays, forKey: .makeUpDays)
+        try c.encode(breaks, forKey: .breaks)
+        try c.encode(schedulingStrategy, forKey: .schedulingStrategy)
+    }
+
+    /// Calendar tabs: not a day off (includes make-up days).
+    var visibleCalendarDays: [DayOfWeek] {
+        DayOfWeek.allCases.filter { !daysOff.contains($0) }
+    }
+
+    /// Days eligible for automatic placement.
+    var autoSchedulingDays: [DayOfWeek] {
+        let makeup = Set(makeUpDays)
+        return DayOfWeek.allCases.filter { !daysOff.contains($0) && !makeup.contains($0) }
     }
 }
 
@@ -236,6 +297,7 @@ let defaultWorkspace = Workspace(
         homeAddress: "",
         workingHours: WorkerProfile.WorkingHours(startTime: "08:00", endTime: "17:00"),
         daysOff: [.saturday, .sunday],
+        makeUpDays: [],
         breaks: [WorkerProfile.WorkBreak(startTime: "12:00", endTime: "13:00", label: "Lunch")],
         schedulingStrategy: .spread
     ),

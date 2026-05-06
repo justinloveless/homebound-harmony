@@ -11,7 +11,7 @@ import {
   type EncryptedBlob,
 } from './crypto';
 import { DEFAULT_WORKSPACE, type Workspace } from '@/types/models';
-import { loadWorkspace as loadCached, saveWorkspace as saveCached } from './storage';
+import { loadWorkspace as loadCached, saveWorkspace as saveCached, migrateWorkspace } from './storage';
 
 interface ServerBlob extends EncryptedBlob {
   wrappedWorkspaceKey: string;
@@ -33,10 +33,11 @@ export async function pullWorkspace(wk: CryptoKey): Promise<SyncState> {
   if (!blob.ciphertext || !blob.iv) {
     return { workspace: { ...DEFAULT_WORKSPACE }, version: blob.version };
   }
-  const ws = await decryptJson<Workspace>(
+  const raw = await decryptJson<Workspace>(
     { ciphertext: blob.ciphertext, iv: blob.iv },
     wk,
   );
+  const ws = migrateWorkspace(raw);
   await saveCached(ws);
   return { workspace: ws, version: blob.version };
 }
