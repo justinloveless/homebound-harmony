@@ -175,12 +175,47 @@ struct ScheduleView: View {
 
     // MARK: - Helpers
 
-    /// Days shown in the schedule tab strip: worker working days only (not in `daysOff`).
-    /// Falls back to all `schedule.days` if that would hide every day (misconfigured profile).
+    /// Days shown in the schedule tab strip: every worker working day for this week (not in `daysOff`).
+    ///
+    /// `lastSchedule.days` from the server only includes days that had visits when the schedule was built.
+    /// If a day was a day off then, it has no row — when the worker later marks that day as working, we still
+    /// need a tab and timeline, so missing working days get a placeholder `DaySchedule` until edits persist.
     private func scheduleDaysForSelector(_ schedule: WeekSchedule, worker: WorkerProfile) -> [DaySchedule] {
         let off = Set(worker.daysOff)
-        let filtered = schedule.days.filter { !off.contains($0.day) }
-        return filtered.isEmpty ? schedule.days : filtered
+        let byDay = Dictionary(uniqueKeysWithValues: schedule.days.map { ($0.day, $0) })
+        var out: [DaySchedule] = []
+        for day in DayOfWeek.allCases {
+            guard !off.contains(day) else { continue }
+            if let existing = byDay[day] {
+                out.append(existing)
+            } else if let iso = isoDateInWeek(weekStart: schedule.weekStartDate, day: day) {
+                out.append(
+                    DaySchedule(
+                        day: day,
+                        date: iso,
+                        visits: [],
+                        totalTravelMinutes: 0,
+                        leaveHomeTime: worker.workingHours.startTime,
+                        arriveHomeTime: worker.workingHours.endTime
+                    )
+                )
+            }
+        }
+        return out.isEmpty ? schedule.days : out
+    }
+
+    /// `weekStartDate` is Monday of the week (same as web `getMonday()` / `DAYS_OF_WEEK` indexing).
+    private func isoDateInWeek(weekStart: String, day: DayOfWeek) -> String? {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        guard let start = fmt.date(from: weekStart) else { return nil }
+        guard let idx = DayOfWeek.allCases.firstIndex(of: day) else { return nil }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        guard let d = cal.date(byAdding: .day, value: idx, to: cal.startOfDay(for: start)) else { return nil }
+        return fmt.string(from: d)
     }
 
     private func firstActiveDay(_ schedule: WeekSchedule, worker: WorkerProfile) -> DayOfWeek {
