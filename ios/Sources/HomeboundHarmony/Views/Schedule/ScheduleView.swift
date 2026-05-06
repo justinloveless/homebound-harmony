@@ -143,7 +143,7 @@ struct ScheduleView: View {
 
     private func dayHeader(_ day: DaySchedule, selectorDays: [DaySchedule], worker: WorkerProfile) -> some View {
         let isMakeUp = worker.makeUpDays.contains(day.day)
-        HStack {
+        return HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(formatDate(day.date))
