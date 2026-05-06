@@ -5,6 +5,7 @@ import SwiftUI
 
 struct ScheduleView: View {
     @Environment(AppState.self) private var appState
+    @Namespace private var dayPickerGlassNS
     @State private var selectedDay: DayOfWeek?
     @State private var saveError: String? = nil
     @State private var isSaving = false
@@ -74,19 +75,10 @@ struct ScheduleView: View {
             Divider()
 
             // Day selector: only working days; equal width across the bar
-            HStack(spacing: 0) {
-                ForEach(selectorDays) { day in
-                    DayTab(
-                        day: day,
-                        isSelected: selectedDay == day.day,
-                        hasVisits: !day.visits.isEmpty
-                    ) { selectedDay = day.day }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(.secondarySystemBackground))
+            daySelectorBar(
+                selectorDays: selectorDays,
+                effectiveSelected: selectedDay ?? firstActiveDay(schedule, worker: worker)
+            )
         }
         .onAppear {
             if selectedDay == nil { selectedDay = firstActiveDay(schedule, worker: worker) }
@@ -97,6 +89,35 @@ struct ScheduleView: View {
         }
         .onChange(of: schedule.weekStartDate) { _, _ in
             clampSelectedDay(schedule, worker: worker, visibleDays: scheduleDaysForSelector(schedule, worker: worker))
+        }
+    }
+
+    @ViewBuilder
+    private func daySelectorBar(selectorDays: [DaySchedule], effectiveSelected: DayOfWeek) -> some View {
+        if #available(iOS 26.0, *) {
+            GlassDaySelectorBar(
+                days: selectorDays,
+                selectedDay: effectiveSelected,
+                namespace: dayPickerGlassNS
+            ) { selectedDay = $0 }
+        } else {
+            HStack(spacing: 0) {
+                ForEach(selectorDays) { day in
+                    DayTab(
+                        day: day,
+                        isSelected: effectiveSelected == day.day,
+                        hasVisits: !day.visits.isEmpty
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selectedDay = day.day
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(.secondarySystemBackground))
         }
     }
 
@@ -266,5 +287,63 @@ struct DayTab: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Liquid Glass day bar (iOS 26+)
+
+@available(iOS 26.0, *)
+private struct GlassDaySelectorBar: View {
+    let days: [DaySchedule]
+    var selectedDay: DayOfWeek
+    var namespace: Namespace.ID
+    var onSelect: (DayOfWeek) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(days) { day in
+                let isSelected = selectedDay == day.day
+                Button {
+                    withAnimation(.smooth(duration: 0.35)) {
+                        onSelect(day.day)
+                    }
+                } label: {
+                    VStack(spacing: 2) {
+                        Text(day.day.label)
+                            .font(.caption.weight(.semibold))
+                        Text("\(day.visits.count)")
+                            .font(.caption2)
+                            .foregroundStyle(day.visits.isEmpty ? .tertiary : .primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        // Keep Liquid Glass only on the pill layer. Wrapping the labels in
+        // `GlassEffectContainer` composites them with the material and blurs the text.
+        .background(alignment: .leading) {
+            GlassEffectContainer(spacing: 28) {
+                GeometryReader { geo in
+                    let count = max(CGFloat(days.count), 1)
+                    let segmentWidth = geo.size.width / count
+                    if let idx = days.firstIndex(where: { $0.day == selectedDay }) {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(.clear)
+                            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .glassEffectID("scheduleDaySelection", in: namespace)
+                            .frame(width: segmentWidth, height: geo.size.height)
+                            .offset(x: segmentWidth * CGFloat(idx))
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemBackground))
     }
 }
