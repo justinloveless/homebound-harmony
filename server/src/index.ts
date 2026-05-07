@@ -10,7 +10,8 @@ import { workspaceRouter } from './routes/workspace';
 import { snapshotRouter } from './routes/snapshot';
 import { eventsRouter } from './routes/events';
 import { shareRouter, shareDataHandler } from './routes/share';
-import { resolveDatabaseUrl, runMigrations } from './db/migrate';
+import { runMigrations } from './db/migrate';
+import { resolveDatabaseUrl } from './db/connection';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

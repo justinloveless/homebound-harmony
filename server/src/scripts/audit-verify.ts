@@ -8,6 +8,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { asc, eq } from 'drizzle-orm';
 import { dataEvents } from '../db/schema';
 import { computeEventHash, type HashEnvelopeInput } from '../services/eventChain';
+import { resolveDatabaseUrl } from '../db/connection';
 
 const args = process.argv.slice(2);
 const userIdx = args.indexOf('--user');
@@ -17,11 +18,7 @@ if (userIdx === -1 || !args[userIdx + 1]) {
 }
 const userId = args[userIdx + 1];
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  console.error('DATABASE_URL required');
-  process.exit(1);
-}
+const connectionString = resolveDatabaseUrl();
 
 const pg = postgres(connectionString, { max: 1 });
 const db = drizzle(pg);
