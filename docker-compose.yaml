@@ -73,6 +73,8 @@ services:
       # variable name, producing junk keys like `TOTP_KEK:?TOTP_KEK_is_...`.
       TOTP_KEK: ${TOTP_KEK}
       IP_HASH_PEPPER: ${IP_HASH_PEPPER}
+      # Optional: comma-separated emails that may call `/api/admin/*` (platform operator UI).
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
     expose:
       - "3000"
     healthcheck:

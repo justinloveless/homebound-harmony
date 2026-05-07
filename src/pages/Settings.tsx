@@ -11,8 +11,16 @@ import { DAYS_OF_WEEK, DAY_LABELS, STRATEGY_LABELS, type DayOfWeek, type WorkerP
 import { AddressSearch } from '@/components/AddressSearch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { exportWorkspace, importWorkspace, downloadJson } from '@/lib/storage';
-import { api } from '@/lib/api';
-import { derivePdk, generatePdkSalt, wrapKey } from '@/lib/crypto';
+import { api, getActiveWorkspaceId } from '@/lib/api';
+import {
+  derivePdk,
+  DEVICE_ECDH_STORAGE_KEY,
+  exportEcdhPrivatePkcs8,
+  exportEcdhPublicKeySpki,
+  generateEcdhDeviceKeyPair,
+  generatePdkSalt,
+  wrapKey,
+} from '@/lib/crypto';
 import { toast } from 'sonner';
 
 export default function SettingsPage() {
@@ -204,6 +212,8 @@ export default function SettingsPage() {
 
       <Separator />
 
+      <DeviceKeyCard />
+
       <ChangePasswordCard pdkSalt={auth.me?.pdkSalt} workspaceKey={auth.workspaceKey} />
 
       <Card>
@@ -229,6 +239,41 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function DeviceKeyCard() {
+  const [busy, setBusy] = useState(false);
+  const onEnroll = async () => {
+    setBusy(true);
+    try {
+      const pair = await generateEcdhDeviceKeyPair();
+      const pub = await exportEcdhPublicKeySpki(pair.publicKey);
+      const pkcs8 = await exportEcdhPrivatePkcs8(pair.privateKey);
+      localStorage.setItem(DEVICE_ECDH_STORAGE_KEY, pkcs8);
+      await api.patch('/api/auth/me/device-key', { masterPublicKey: pub });
+      toast.success('Device key enrolled on this browser');
+    } catch {
+      toast.error('Device key enrollment failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Workspace device key</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-sm text-muted-foreground">
+          Generate a key pair so others can invite you to shared workspaces. The private key stays in this
+          browser&apos;s storage.
+        </p>
+        <Button type="button" variant="secondary" disabled={busy} onClick={() => void onEnroll()}>
+          {busy ? 'Working…' : 'Generate and register device key'}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -264,12 +309,14 @@ function ChangePasswordCard({ pdkSalt, workspaceKey }: ChangePasswordProps) {
       // recovery envelope.)
       const blob = await api.get<{ wrappedWorkspaceKeyRecovery: string }>('/api/snapshot');
 
+      const workspaceId = getActiveWorkspaceId();
       await api.post('/api/auth/password/change', {
         currentPassword,
         newPassword,
         newPdkSalt,
         newWrappedWorkspaceKey,
         newWrappedWorkspaceKeyRecovery: blob.wrappedWorkspaceKeyRecovery,
+        ...(workspaceId ? { workspaceId } : {}),
       });
 
       toast.success('Password updated. Sign in again next time you reload.');

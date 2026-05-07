@@ -10,6 +10,8 @@ import { workspaceRouter } from './routes/workspace';
 import { snapshotRouter } from './routes/snapshot';
 import { eventsRouter } from './routes/events';
 import { shareRouter, shareDataHandler } from './routes/share';
+import { adminRouter } from './routes/admin';
+import { workspaceTeamRouter } from './routes/workspaceTeam';
 import { runMigrations } from './db/migrate';
 import { resolveDatabaseUrl } from './db/connection';
 
@@ -47,6 +49,8 @@ app.route('/api/workspace', workspaceRouter);
 app.route('/api/snapshot', snapshotRouter);
 app.route('/api/events', eventsRouter);
 app.route('/api/share', shareRouter);
+app.route('/api/admin', adminRouter);
+app.route('/api/workspace', workspaceTeamRouter);
 
 // Public share data endpoint — anyone with the URL fragment key can read.
 app.get('/s/:id/data', shareDataHandler);

@@ -6,11 +6,12 @@ import { and, eq, gt, asc, sql } from 'drizzle-orm';
 import { requireUser } from '../auth/middleware';
 import { hashIp } from '../services/ipHash';
 import { computeEventHash, type HashEnvelopeInput } from '../services/eventChain';
+import { resolveWorkspace, resolveWorkspaceFromQuery, canPostEvents } from '../services/workspaceContext';
 
 const sseEventConnections = new Map<string, Set<(msg: { seq: number; hash: string }) => void>>();
 
-export function notifyEventAppend(userId: string, seq: number, hash: string) {
-  const conns = sseEventConnections.get(userId);
+export function notifyEventAppend(workspaceId: string, seq: number, hash: string) {
+  const conns = sseEventConnections.get(workspaceId);
   if (conns) for (const send of conns) send({ seq, hash });
 }
 
@@ -25,7 +26,16 @@ events.use('*', requireUser);
 
 // POST /api/events
 events.post('/', async (c) => {
-  const userId = (c as any).get('userId') as string;
+  const sessionUserId = (c as any).get('userId') as string;
+  const rw = await resolveWorkspace(c, sessionUserId);
+  if (!rw) {
+    return c.json({ error: 'Workspace not found; set X-Workspace-Id if you belong to several.' }, 404);
+  }
+  if (!canPostEvents(rw.role)) {
+    return c.json({ error: 'Insufficient permission to append events' }, 403);
+  }
+
+  const workspaceId = rw.workspaceId;
   const body = await c.req.json().catch(() => null);
   if (!body?.events || !Array.isArray(body.events)) {
     return c.json({ error: 'Invalid request: expected { events: [...] }' }, 400);
@@ -37,7 +47,9 @@ events.post('/', async (c) => {
 
   try {
     await db.transaction(async (tx) => {
-      await tx.execute(sql`SELECT user_id FROM user_event_chain WHERE user_id = ${userId}::uuid FOR UPDATE`);
+      await tx.execute(
+        sql`SELECT workspace_id FROM user_event_chain WHERE workspace_id = ${workspaceId}::uuid FOR UPDATE`,
+      );
 
       for (const raw of body.events as Record<string, unknown>[]) {
         const clientEventId = raw.clientEventId;
@@ -68,7 +80,7 @@ events.post('/', async (c) => {
         const existing = await tx
           .select()
           .from(dataEvents)
-          .where(and(eq(dataEvents.userId, userId), eq(dataEvents.clientEventId, clientEventId)))
+          .where(and(eq(dataEvents.workspaceId, workspaceId), eq(dataEvents.clientEventId, clientEventId)))
           .limit(1);
 
         if (existing.length > 0) {
@@ -82,11 +94,11 @@ events.post('/', async (c) => {
           continue;
         }
 
-        const chainRows = await tx.select().from(userEventChain).where(eq(userEventChain.userId, userId));
+        const chainRows = await tx.select().from(userEventChain).where(eq(userEventChain.workspaceId, workspaceId));
         let head = chainRows[0];
         if (!head) {
-          await tx.insert(userEventChain).values({ userId, headSeq: 0, headHash: '' });
-          head = { userId, headSeq: 0, headHash: '' };
+          await tx.insert(userEventChain).values({ workspaceId, headSeq: 0, headHash: '' });
+          head = { workspaceId, headSeq: 0, headHash: '' };
         }
 
         const newSeq = head.headSeq + 1;
@@ -94,8 +106,9 @@ events.post('/', async (c) => {
         const serverReceivedAt = new Date();
         const serverIso = serverReceivedAt.toISOString();
 
+        // Hash chain scope uses `userId` field name in JSON for backwards compatibility; value is workspace id.
         const envelope: HashEnvelopeInput = {
-          userId,
+          userId: workspaceId,
           clientEventId,
           seq: newSeq,
           serverReceivedAt: serverIso,
@@ -112,7 +125,8 @@ events.post('/', async (c) => {
         const hash = computeEventHash(prevHash, envelope);
 
         await tx.insert(dataEvents).values({
-          userId,
+          workspaceId,
+          authorUserId: sessionUserId,
           clientEventId,
           seq: newSeq,
           prevHash,
@@ -133,7 +147,7 @@ events.post('/', async (c) => {
         await tx
           .update(userEventChain)
           .set({ headSeq: newSeq, headHash: hash })
-          .where(eq(userEventChain.userId, userId));
+          .where(eq(userEventChain.workspaceId, workspaceId));
 
         accepted.push({
           clientEventId,
@@ -158,22 +172,27 @@ events.post('/', async (c) => {
   }
 
   for (const row of accepted) {
-    notifyEventAppend(userId, row.seq, row.hash);
+    notifyEventAppend(workspaceId, row.seq, row.hash);
   }
 
   return c.json({ accepted });
 });
 
-// GET /api/events?since=0&limit=500
+// GET /api/events?since=0&limit=500&workspaceId=...
 events.get('/', async (c) => {
-  const userId = (c as any).get('userId') as string;
+  const sessionUserId = (c as any).get('userId') as string;
+  const rw = await resolveWorkspaceFromQuery(c, sessionUserId);
+  if (!rw) {
+    return c.json({ error: 'Workspace not found; pass workspaceId query or X-Workspace-Id header.' }, 404);
+  }
+
   const since = Number(c.req.query('since') ?? '0');
   const limit = Math.min(500, Math.max(1, Number(c.req.query('limit') ?? '100')));
 
   const rows = await db
     .select()
     .from(dataEvents)
-    .where(and(eq(dataEvents.userId, userId), gt(dataEvents.seq, since)))
+    .where(and(eq(dataEvents.workspaceId, rw.workspaceId), gt(dataEvents.seq, since)))
     .orderBy(asc(dataEvents.seq))
     .limit(limit);
 
@@ -188,6 +207,7 @@ events.get('/', async (c) => {
       clientClaimedAt: r.clientClaimedAt.toISOString(),
       serverReceivedAt: r.serverReceivedAt.toISOString(),
       isClinical: r.isClinical,
+      authorUserId: r.authorUserId,
       gpsLat: r.gpsLat,
       gpsLon: r.gpsLon,
       gpsAccuracyM: r.gpsAccuracyM,
@@ -197,17 +217,24 @@ events.get('/', async (c) => {
   });
 });
 
-// GET /api/events/stream
+// GET /api/events/stream?workspaceId=...
 events.get('/stream', (c) => {
-  const userId = (c as any).get('userId') as string;
+  const sessionUserId = (c as any).get('userId') as string;
 
   return streamSSE(c, async (stream) => {
+    const rw = await resolveWorkspaceFromQuery(c, sessionUserId);
+    if (!rw) {
+      await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: 'workspace not found' }) });
+      return;
+    }
+    const workspaceId = rw.workspaceId;
+
     const send = (msg: { seq: number; hash: string }) => {
       stream.writeSSE({ event: 'update', data: JSON.stringify(msg) }).catch(() => {});
     };
 
-    if (!sseEventConnections.has(userId)) sseEventConnections.set(userId, new Set());
-    sseEventConnections.get(userId)!.add(send);
+    if (!sseEventConnections.has(workspaceId)) sseEventConnections.set(workspaceId, new Set());
+    sseEventConnections.get(workspaceId)!.add(send);
 
     const heartbeat = setInterval(() => {
       stream.writeSSE({ event: 'heartbeat', data: '' }).catch(() => {});
@@ -215,7 +242,7 @@ events.get('/stream', (c) => {
 
     stream.onAbort(() => {
       clearInterval(heartbeat);
-      sseEventConnections.get(userId)?.delete(send);
+      sseEventConnections.get(workspaceId)?.delete(send);
     });
 
     await new Promise<void>(resolve => {

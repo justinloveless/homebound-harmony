@@ -167,9 +167,16 @@ final class AppState {
         }.value
 
         let snap: ServerSnapshot = try await api.get(path: "/api/snapshot")
+        if let wid = snap.workspaceId { APIService.activeWorkspaceId = wid }
         workspaceVersion = snap.version
         snapshotSeq = snap.snapshotSeq
-        let wk = try crypto.unwrapWorkspaceKey(envelope: snap.wrappedWorkspaceKey, wrappingKey: pdk)
+        let wk: SymmetricKey
+        do {
+            wk = try crypto.unwrapWorkspaceKeyFromServer(envelope: snap.wrappedWorkspaceKey, wrappingKey: pdk)
+        } catch let ce as CryptoError {
+            if case .deviceKeyInviteNotSupportedOnIOS = ce { throw ce }
+            throw ce
+        }
         workspaceKey = wk
 
         wk.withUnsafeBytes { keychain.saveWorkspaceKey(Data($0)) }
@@ -212,14 +219,18 @@ final class AppState {
         }
 
         let snap: ServerSnapshot = try await api.get(path: "/api/snapshot")
+        if let wid = snap.workspaceId { APIService.activeWorkspaceId = wid }
         workspaceVersion = snap.version
         snapshotSeq = snap.snapshotSeq
 
         do {
-            workspaceKey = try crypto.unwrapWorkspaceKey(
+            workspaceKey = try crypto.unwrapWorkspaceKeyFromServer(
                 envelope: snap.wrappedWorkspaceKey,
                 wrappingKey: pdk
             )
+        } catch let ce as CryptoError {
+            if case .deviceKeyInviteNotSupportedOnIOS = ce { throw ce }
+            throw AppError.wrongPassword
         } catch {
             throw AppError.wrongPassword
         }
@@ -245,6 +256,7 @@ final class AppState {
         stopEventStream()
         EventOutboxStore.shared.clear()
         let _: EmptyResponse? = try? await api.post(path: "/api/auth/logout", body: Optional<String>.none)
+        APIService.activeWorkspaceId = nil
         workspaceKey = nil
         workspace    = nil
         keychain.deleteAll()

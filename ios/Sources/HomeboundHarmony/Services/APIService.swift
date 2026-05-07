@@ -38,6 +38,17 @@ enum APIError: LocalizedError, Equatable {
 
 final class APIService {
 
+    private static let activeWorkspaceIdKey = "RouteCare.activeWorkspaceId"
+
+    /// Sent as `X-Workspace-Id` on API calls after a successful snapshot (multi-workspace support).
+    static var activeWorkspaceId: String? {
+        get { UserDefaults.standard.string(forKey: activeWorkspaceIdKey) }
+        set {
+            if let v = newValue { UserDefaults.standard.set(v, forKey: activeWorkspaceIdKey) }
+            else { UserDefaults.standard.removeObject(forKey: activeWorkspaceIdKey) }
+        }
+    }
+
     private var baseURL: String {
         UserDefaults.standard.string(forKey: "apiBaseURL") ?? ""
     }
@@ -75,7 +86,13 @@ final class APIService {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try encoder.encode(body)
         }
-        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        var merged = headers
+        if let wid = Self.activeWorkspaceId, !wid.isEmpty {
+            if merged["X-Workspace-Id"] == nil {
+                merged["X-Workspace-Id"] = wid
+            }
+        }
+        for (k, v) in merged { req.setValue(v, forHTTPHeaderField: k) }
 
         let (data, response): (Data, URLResponse)
         do {
@@ -199,7 +216,13 @@ final class APIService {
     /// `GET /api/events/stream` — cookies flow through `URLSession.shared` like other API calls.
     static func eventsStreamRequest() throws -> URLRequest {
         let trimmed = UserDefaults.standard.string(forKey: "apiBaseURL")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let url = try makeAbsoluteURL(baseURL: trimmed, path: "/api/events/stream")
+        var path = "/api/events/stream"
+        if let wid = activeWorkspaceId,
+           !wid.isEmpty,
+           let enc = wid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "?workspaceId=\(enc)"
+        }
+        let url = try makeAbsoluteURL(baseURL: trimmed, path: path)
         var req = URLRequest(url: url)
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         return req

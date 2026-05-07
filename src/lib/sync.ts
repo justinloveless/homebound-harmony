@@ -1,6 +1,6 @@
 // Workspace sync: snapshot + encrypted event tail + SSE on /api/events/stream.
 
-import { api, ApiError, eventSource } from './api';
+import { api, ApiError, eventSource, setActiveWorkspaceId } from './api';
 import {
   decryptJson,
   encryptJson,
@@ -19,6 +19,8 @@ import {
 } from './outbox';
 
 export interface ServerSnapshot extends EncryptedBlob {
+  workspaceId?: string;
+  keyEpoch?: number;
   wrappedWorkspaceKey: string;
   wrappedWorkspaceKeyRecovery: string;
   version: number;
@@ -41,6 +43,7 @@ export async function fetchServerSnapshot(): Promise<ServerSnapshot> {
 /** Pull snapshot + replay events with seq > snapshotSeq; drain local outbox. */
 export async function pullWorkspace(wk: CryptoKey): Promise<SyncState> {
   const blob = await fetchServerSnapshot();
+  if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
   let ws: Workspace;
   if (!blob.ciphertext || !blob.iv) {
     ws = { ...DEFAULT_WORKSPACE };

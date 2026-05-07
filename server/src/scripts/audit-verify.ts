@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Verify the tamper-evident hash chain for a user's data_events.
- * Usage: bun run audit:verify -- --user <uuid>
+ * Verify the tamper-evident hash chain for a workspace's data_events.
+ * Usage: bun run audit:verify -- --workspace <uuid>
+ * (Legacy: --user <uuid> is accepted as an alias for the workspace id.)
  */
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -11,12 +12,16 @@ import { computeEventHash, type HashEnvelopeInput } from '../services/eventChain
 import { resolveDatabaseUrl } from '../db/connection';
 
 const args = process.argv.slice(2);
+let workspaceId: string | undefined;
+const wsIdx = args.indexOf('--workspace');
 const userIdx = args.indexOf('--user');
-if (userIdx === -1 || !args[userIdx + 1]) {
-  console.error('Usage: bun src/scripts/audit-verify.ts -- --user <uuid>');
+if (wsIdx !== -1 && args[wsIdx + 1]) workspaceId = args[wsIdx + 1];
+else if (userIdx !== -1 && args[userIdx + 1]) workspaceId = args[userIdx + 1];
+
+if (!workspaceId) {
+  console.error('Usage: bun src/scripts/audit-verify.ts -- --workspace <uuid>');
   process.exit(1);
 }
-const userId = args[userIdx + 1];
 
 const connectionString = resolveDatabaseUrl();
 
@@ -26,7 +31,7 @@ const db = drizzle(pg);
 const rows = await db
   .select()
   .from(dataEvents)
-  .where(eq(dataEvents.userId, userId))
+  .where(eq(dataEvents.workspaceId, workspaceId))
   .orderBy(asc(dataEvents.seq));
 
 let prev = '';
@@ -38,7 +43,7 @@ for (const r of rows) {
     break;
   }
   const input: HashEnvelopeInput = {
-    userId,
+    userId: workspaceId,
     clientEventId: r.clientEventId,
     seq: r.seq,
     serverReceivedAt: r.serverReceivedAt.toISOString(),
@@ -65,5 +70,5 @@ await pg.end({ timeout: 2 });
 if (!ok) {
   process.exit(1);
 }
-console.log(`Verified ${rows.length} events for user ${userId}`);
+console.log(`Verified ${rows.length} events for workspace ${workspaceId}`);
 process.exit(0);

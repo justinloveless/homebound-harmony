@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, bigint, timestamp, integer, boolean, doublePrecision, real, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, bigint, timestamp, integer, boolean, doublePrecision, real, uniqueIndex, index, primaryKey } from 'drizzle-orm/pg-core';
 
 const tstz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -23,14 +23,57 @@ export const userSessions = pgTable('user_sessions', {
   createdAt: tstz('created_at').defaultNow().notNull(),
 });
 
+export const workspaces = pgTable('workspaces', {
+  id: uuid('id').primaryKey(),
+  createdAt: tstz('created_at').defaultNow().notNull(),
+});
+
+export const workspaceMembers = pgTable(
+  'workspace_members',
+  {
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    role: text('role').notNull().default('owner'),
+    invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+    revokedAt: tstz('revoked_at'),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.workspaceId, t.userId] }),
+  }),
+);
+
+export const workspaceKeyWraps = pgTable(
+  'workspace_key_wraps',
+  {
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    keyEpoch: integer('key_epoch').notNull().default(0),
+    wrappedWorkspaceKey: text('wrapped_workspace_key').notNull(),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.workspaceId, t.userId, t.keyEpoch] }),
+  }),
+);
+
 export const workspaceSnapshots = pgTable('workspace_snapshots', {
-  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
   ciphertext: text('ciphertext').notNull().default(''),
   iv: text('iv').notNull().default(''),
-  wrappedWorkspaceKey: text('wrapped_workspace_key').notNull(),
   wrappedWorkspaceKeyRecovery: text('wrapped_workspace_key_recovery').notNull(),
+  keyEpoch: integer('key_epoch').notNull().default(0),
   version: bigint('version', { mode: 'number' }).notNull().default(0),
-  /** Last event sequence included in this ciphertext (replay events with seq > this). */
   snapshotSeq: bigint('snapshot_seq', { mode: 'number' }).notNull().default(0),
   updatedAt: tstz('updated_at').defaultNow().notNull(),
 });
@@ -39,7 +82,12 @@ export const dataEvents = pgTable(
   'data_events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    authorUserId: uuid('author_user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
     clientEventId: text('client_event_id').notNull(),
     seq: bigint('seq', { mode: 'number' }).notNull(),
     prevHash: text('prev_hash').notNull(),
@@ -57,13 +105,15 @@ export const dataEvents = pgTable(
     isClinical: boolean('is_clinical').notNull(),
   },
   (t) => ({
-    userClientUniq: uniqueIndex('data_events_user_client_event_id_unique').on(t.userId, t.clientEventId),
-    userSeqIdx: index('data_events_user_id_seq_idx').on(t.userId, t.seq),
+    workspaceClientUniq: uniqueIndex('data_events_workspace_client_event_id_unique').on(t.workspaceId, t.clientEventId),
+    workspaceSeqIdx: index('data_events_workspace_id_seq_idx').on(t.workspaceId, t.seq),
   }),
 );
 
 export const userEventChain = pgTable('user_event_chain', {
-  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
   headSeq: bigint('head_seq', { mode: 'number' }).notNull().default(0),
   headHash: text('head_hash').notNull().default(''),
 });

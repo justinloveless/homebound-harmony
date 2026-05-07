@@ -1,15 +1,17 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { db } from '../db/client';
-import { users, workspaceSnapshots, userEventChain, auditEvents } from '../db/schema';
-import { and, eq } from 'drizzle-orm';
+import { users, workspaces, workspaceMembers, workspaceKeyWraps, workspaceSnapshots, userEventChain, auditEvents } from '../db/schema';
 import { hashPassword, verifyPassword, encryptTotpSecret, decryptTotpSecret } from '../auth/argon';
 import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/totp';
 import { createSession, deleteSession } from '../auth/session';
 import { requireUser } from '../auth/middleware';
+import { isAdminEmail } from '../auth/admin';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '../auth/cookie';
 import { logEvent } from '../services/audit';
 import { timingSafeEqual } from 'crypto';
+import { and, eq, isNull } from 'drizzle-orm';
+import { listActiveWorkspaceIdsForUser } from '../services/workspaceContext';
 
 const auth = new Hono();
 
@@ -91,11 +93,21 @@ auth.post('/register', async (c) => {
       mfaDisabled: false,
       updatedAt: new Date(),
     }).where(eq(users.id, userId));
+    const wsId = userId;
     await db.update(workspaceSnapshots).set({
-      wrappedWorkspaceKey,
       wrappedWorkspaceKeyRecovery,
       updatedAt: new Date(),
-    }).where(eq(workspaceSnapshots.userId, userId));
+    }).where(eq(workspaceSnapshots.workspaceId, wsId));
+    await db
+      .update(workspaceKeyWraps)
+      .set({ wrappedWorkspaceKey, createdAt: new Date() })
+      .where(
+        and(
+          eq(workspaceKeyWraps.workspaceId, wsId),
+          eq(workspaceKeyWraps.userId, userId),
+          eq(workspaceKeyWraps.keyEpoch, 0),
+        ),
+      );
   } else {
     const [user] = await db.insert(users).values({
       email: normalizedEmail,
@@ -104,13 +116,23 @@ auth.post('/register', async (c) => {
       recoveryKeyHash,
     }).returning({ id: users.id });
     userId = user.id;
+    const wsId = userId;
 
-    await db.insert(workspaceSnapshots).values({
+    await db.insert(workspaces).values({ id: wsId });
+    await db.insert(workspaceMembers).values({ workspaceId: wsId, userId, role: 'owner' });
+    await db.insert(workspaceKeyWraps).values({
+      workspaceId: wsId,
       userId,
+      keyEpoch: 0,
       wrappedWorkspaceKey,
-      wrappedWorkspaceKeyRecovery,
     });
-    await db.insert(userEventChain).values({ userId, headSeq: 0, headHash: '' }).onConflictDoNothing();
+    await db.insert(workspaceSnapshots).values({
+      workspaceId: wsId,
+      wrappedWorkspaceKeyRecovery,
+      ciphertext: '',
+      iv: '',
+    });
+    await db.insert(userEventChain).values({ workspaceId: wsId, headSeq: 0, headHash: '' });
   }
 
   const registrationToken = createRegToken(userId);
@@ -214,6 +236,41 @@ auth.post('/logout', requireUser, async (c) => {
   return c.json({ success: true });
 });
 
+// GET /api/auth/lookup-user?email=  (for workspace invites)
+auth.get('/lookup-user', requireUser, async (c) => {
+  const email = c.req.query('email')?.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return c.json({ error: 'Invalid email' }, 400);
+  }
+  const rows = await db
+    .select({ id: users.id, email: users.email, masterPublicKey: users.masterPublicKey })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+  const u = rows[0];
+  if (!u) return c.json({ error: 'User not found' }, 404);
+  return c.json({
+    id: u.id,
+    email: u.email,
+    masterPublicKey: u.masterPublicKey,
+  });
+});
+
+// PATCH /api/auth/me/device-key  { masterPublicKey }
+auth.patch('/me/device-key', requireUser, async (c) => {
+  const user = (c as any).get('user') as typeof users.$inferSelect;
+  const body = await c.req.json().catch(() => null);
+  const masterPublicKey = body?.masterPublicKey;
+  if (typeof masterPublicKey !== 'string' || !masterPublicKey.trim()) {
+    return c.json({ error: 'Missing masterPublicKey' }, 400);
+  }
+  await db
+    .update(users)
+    .set({ masterPublicKey: masterPublicKey.trim(), updatedAt: new Date() })
+    .where(eq(users.id, user.id));
+  return c.json({ success: true });
+});
+
 // GET /api/auth/me
 auth.get('/me', requireUser, async (c) => {
   const user = (c as any).get('user') as typeof users.$inferSelect;
@@ -224,6 +281,7 @@ auth.get('/me', requireUser, async (c) => {
     pdkSalt: user.pdkSalt,
     totpEnrolled: !!user.totpSecretEncrypted,
     mfaDisabled: user.mfaDisabled,
+    isAdmin: isAdminEmail(user.email),
   });
 });
 
@@ -231,7 +289,14 @@ auth.get('/me', requireUser, async (c) => {
 auth.post('/password/change', requireUser, async (c) => {
   const user = (c as any).get('user') as typeof users.$inferSelect;
   const body = await c.req.json().catch(() => null);
-  const { currentPassword, newPassword, newPdkSalt, newWrappedWorkspaceKey, newWrappedWorkspaceKeyRecovery } = body ?? {};
+  const {
+    currentPassword,
+    newPassword,
+    newPdkSalt,
+    newWrappedWorkspaceKey,
+    newWrappedWorkspaceKeyRecovery,
+    workspaceId: bodyWorkspaceId,
+  } = body ?? {};
 
   if (!currentPassword || !newPassword || !newPdkSalt || !newWrappedWorkspaceKey || !newWrappedWorkspaceKeyRecovery) {
     return c.json({ error: 'Missing fields' }, 400);
@@ -242,11 +307,48 @@ auth.post('/password/change', requireUser, async (c) => {
     return c.json({ error: 'Invalid current password' }, 401);
   }
 
+  let workspaceId = typeof bodyWorkspaceId === 'string' ? bodyWorkspaceId : undefined;
+  if (!workspaceId) {
+    const ids = await listActiveWorkspaceIdsForUser(user.id);
+    if (ids.length !== 1) {
+      return c.json({ error: 'Pass workspaceId when you belong to multiple workspaces' }, 400);
+    }
+    workspaceId = ids[0];
+  } else {
+    const m = await db
+      .select()
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          eq(workspaceMembers.userId, user.id),
+          isNull(workspaceMembers.revokedAt),
+        ),
+      )
+      .limit(1);
+    if (!m[0]) return c.json({ error: 'Not a member of this workspace' }, 403);
+  }
+
+  const snaps = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.workspaceId, workspaceId)).limit(1);
+  const snap = snaps[0];
+  if (!snap) return c.json({ error: 'Workspace not found' }, 404);
+
   const newHash = await hashPassword(newPassword);
   await db.update(users).set({ passwordHash: newHash, pdkSalt: newPdkSalt, updatedAt: new Date() }).where(eq(users.id, user.id));
-  await db.update(workspaceSnapshots)
-    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, wrappedWorkspaceKeyRecovery: newWrappedWorkspaceKeyRecovery, updatedAt: new Date() })
-    .where(eq(workspaceSnapshots.userId, user.id));
+  await db
+    .update(workspaceKeyWraps)
+    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, createdAt: new Date() })
+    .where(
+      and(
+        eq(workspaceKeyWraps.workspaceId, workspaceId),
+        eq(workspaceKeyWraps.userId, user.id),
+        eq(workspaceKeyWraps.keyEpoch, snap.keyEpoch),
+      ),
+    );
+  await db
+    .update(workspaceSnapshots)
+    .set({ wrappedWorkspaceKeyRecovery: newWrappedWorkspaceKeyRecovery, updatedAt: new Date() })
+    .where(eq(workspaceSnapshots.workspaceId, workspaceId));
 
   await logEvent({ action: 'password_change', userId: user.id, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ success: true });
@@ -271,7 +373,7 @@ auth.post('/recovery/init', async (c) => {
     return c.json({ error: 'Invalid recovery info' }, 401);
   }
 
-  const blobs = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.userId, user.id));
+  const blobs = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.workspaceId, user.id));
   const blob = blobs[0];
   if (!blob) return c.json({ error: 'Workspace missing' }, 500);
 
@@ -306,9 +408,20 @@ auth.post('/recovery', async (c) => {
   await db.update(users)
     .set({ passwordHash: newHash, pdkSalt: newPdkSalt, updatedAt: new Date() })
     .where(eq(users.id, user.id));
-  await db.update(workspaceSnapshots)
-    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, updatedAt: new Date() })
-    .where(eq(workspaceSnapshots.userId, user.id));
+  const snaps = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.workspaceId, user.id)).limit(1);
+  const snap = snaps[0];
+  if (!snap) return c.json({ error: 'Workspace missing' }, 500);
+
+  await db
+    .update(workspaceKeyWraps)
+    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, createdAt: new Date() })
+    .where(
+      and(
+        eq(workspaceKeyWraps.workspaceId, user.id),
+        eq(workspaceKeyWraps.userId, user.id),
+        eq(workspaceKeyWraps.keyEpoch, snap.keyEpoch),
+      ),
+    );
 
   await logEvent({ action: 'recovery_used', userId: user.id, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ success: true });

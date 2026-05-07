@@ -334,6 +334,7 @@ struct MeResponse: Decodable {
     let pdkSalt: String
     let totpEnrolled: Bool
     let mfaDisabled: Bool?
+    let isAdmin: Bool?
 }
 
 struct ServerBlob: Decodable {
@@ -346,6 +347,8 @@ struct ServerBlob: Decodable {
 
 /// GET /api/snapshot — includes `snapshotSeq` for event replay tail.
 struct ServerSnapshot: Decodable {
+    let workspaceId: String?
+    let keyEpoch: Int?
     let ciphertext: String
     let iv: String
     let wrappedWorkspaceKey: String

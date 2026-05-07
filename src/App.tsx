@@ -19,6 +19,10 @@ import RecoverPage from "./pages/Recover";
 import UnlockPage from "./pages/Unlock";
 import ShareManagePage from "./pages/ShareManage";
 import SharePublicPage from "./pages/Share";
+import AdminUsersPage from "./pages/admin/AdminUsers";
+import AdminUserDetailPage from "./pages/admin/AdminUserDetail";
+import AdminAuditPage from "./pages/admin/AdminAudit";
+import WorkspaceTeamPage from "./pages/WorkspaceTeam";
 
 const queryClient = new QueryClient();
 
@@ -33,6 +37,10 @@ function ProtectedShell() {
             <Route path="/schedule" element={<Schedule />} />
             <Route path="/share/manage" element={<ShareManagePage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/workspace/team" element={<WorkspaceTeamPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/users/:id" element={<AdminUserDetailPage />} />
+            <Route path="/admin/audit" element={<AdminAuditPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AppLayout>

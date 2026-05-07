@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api, ApiError } from '@/lib/api';
-import { derivePdk, unwrapKey } from '@/lib/crypto';
+import { api, ApiError, setActiveWorkspaceId } from '@/lib/api';
+import { unwrapWorkspaceKeyFromServerWrap } from '@/lib/crypto';
 
 // Auth state machine. The WK never touches localStorage; on reload we
 // re-derive it from password (`unlock`) once `/api/auth/me` confirms the
@@ -17,6 +17,7 @@ export interface AuthMe {
   pdkSalt: string;
   totpEnrolled: boolean;
   mfaDisabled?: boolean;
+  isAdmin?: boolean;
 }
 
 interface AuthContextValue {
@@ -28,7 +29,7 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   // After registration completes (and login finishes), this lets the
   // register page hand the WK over to the auth state without a fresh login.
-  setUnlockedSession: (me: AuthMe, wk: CryptoKey) => void;
+  setUnlockedSession: (me: AuthMe, wk: CryptoKey, workspaceId?: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -60,11 +61,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string, code?: string) => {
-    const { pdkSalt } = await api.post<{ pdkSalt: string }>('/api/auth/login', { email, password, code });
+    await api.post<{ pdkSalt: string }>('/api/auth/login', { email, password, code });
     const meData = await api.get<AuthMe>('/api/auth/me');
-    const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/snapshot');
-    const pdk = await derivePdk(password, pdkSalt);
-    const wk = await unwrapKey(blob.wrappedWorkspaceKey, pdk);
+    const blob = await api.get<{ wrappedWorkspaceKey: string; workspaceId?: string }>('/api/snapshot');
+    if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
+    let wk: CryptoKey;
+    try {
+      wk = await unwrapWorkspaceKeyFromServerWrap(blob.wrappedWorkspaceKey, {
+        password,
+        pdkSalt: meData.pdkSalt,
+      });
+    } catch (e) {
+      throw e instanceof Error ? e : new Error('Could not unlock workspace');
+    }
     setMe(meData);
     setWorkspaceKey(wk);
     setStatus('unlocked');
@@ -72,13 +81,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const unlock = useCallback(async (password: string) => {
     if (!me) throw new Error('No session to unlock');
-    const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/snapshot');
-    const pdk = await derivePdk(password, me.pdkSalt);
+    const blob = await api.get<{ wrappedWorkspaceKey: string; workspaceId?: string }>('/api/snapshot');
+    if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
     let wk: CryptoKey;
     try {
-      wk = await unwrapKey(blob.wrappedWorkspaceKey, pdk);
+      wk = await unwrapWorkspaceKeyFromServerWrap(blob.wrappedWorkspaceKey, {
+        password,
+        pdkSalt: me.pdkSalt,
+      });
     } catch {
-      throw new Error('Incorrect password');
+      throw new Error('Incorrect password or missing device key');
     }
     setWorkspaceKey(wk);
     setStatus('unlocked');
@@ -86,12 +98,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try { await api.post('/api/auth/logout'); } catch { /* ignore */ }
+    setActiveWorkspaceId(null);
     setMe(null);
     setWorkspaceKey(null);
     setStatus('anonymous');
   }, []);
 
-  const setUnlockedSession = useCallback((meData: AuthMe, wk: CryptoKey) => {
+  const setUnlockedSession = useCallback((meData: AuthMe, wk: CryptoKey, workspaceId?: string | null) => {
+    if (workspaceId) setActiveWorkspaceId(workspaceId);
     setMe(meData);
     setWorkspaceKey(wk);
     setStatus('unlocked');

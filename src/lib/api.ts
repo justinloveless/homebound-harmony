@@ -2,6 +2,21 @@
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
+let activeWorkspaceId: string | null = null;
+
+export function setActiveWorkspaceId(id: string | null) {
+  activeWorkspaceId = id;
+}
+
+export function getActiveWorkspaceId(): string | null {
+  return activeWorkspaceId;
+}
+
+function workspaceHeaders(): Record<string, string> {
+  if (!activeWorkspaceId) return {};
+  return { 'X-Workspace-Id': activeWorkspaceId };
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -24,6 +39,7 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
 
   const finalHeaders: Record<string, string> = {
     Accept: 'application/json',
+    ...workspaceHeaders(),
     ...(headers as Record<string, string> | undefined),
   };
 
@@ -65,8 +81,14 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
 api.get = <T>(path: string, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'GET' });
 api.post = <T>(path: string, body?: unknown, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'POST', body });
 api.put = <T>(path: string, body?: unknown, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'PUT', body });
+api.patch = <T>(path: string, body?: unknown, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'PATCH', body });
 api.del = <T>(path: string, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'DELETE' });
 
 export function eventSource(path: string): EventSource {
-  return new EventSource(`${API_BASE}${path}`, { withCredentials: true });
+  let url = path;
+  if (activeWorkspaceId && path.startsWith('/api/events/stream')) {
+    const q = path.includes('?') ? '&' : '?';
+    url = `${path}${q}workspaceId=${encodeURIComponent(activeWorkspaceId)}`;
+  }
+  return new EventSource(`${API_BASE}${url}`, { withCredentials: true });
 }

@@ -10,9 +10,10 @@ import {
   generatePdkSalt,
   generateRecoveryKey,
   generateWorkspaceKey,
-  unwrapKey,
+  unwrapWorkspaceKeyFromServerWrap,
   wrapKey,
 } from '@/lib/crypto';
+import { setActiveWorkspaceId } from '@/lib/api';
 import type { AuthMe } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -115,16 +116,19 @@ export default function RegisterPage() {
       });
 
       // Auto-login with the same credentials and the (still valid) TOTP code.
-      const { pdkSalt } = await api.post<{ pdkSalt: string }>('/api/auth/login', {
+      await api.post<{ pdkSalt: string }>('/api/auth/login', {
         email: pending.email,
         password: pending.password,
         code: totpCode.trim(),
       });
       const meData = await api.get<AuthMe>('/api/auth/me');
-      const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/snapshot');
-      const pdk = await derivePdk(pending.password, pdkSalt);
-      const wk = await unwrapKey(blob.wrappedWorkspaceKey, pdk);
-      auth.setUnlockedSession(meData, wk);
+      const blob = await api.get<{ wrappedWorkspaceKey: string; workspaceId?: string }>('/api/snapshot');
+      if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
+      const wk = await unwrapWorkspaceKeyFromServerWrap(blob.wrappedWorkspaceKey, {
+        password: pending.password,
+        pdkSalt: meData.pdkSalt,
+      });
+      auth.setUnlockedSession(meData, wk, blob.workspaceId);
       setStep('done');
       navigate('/', { replace: true });
     } catch (err: any) {
