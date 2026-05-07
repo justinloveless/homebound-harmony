@@ -57,7 +57,8 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-app}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       # NODE_ENV=development keeps the cookie name plain `session` so plain
       # HTTP works locally. Switch to `production` (and front this with TLS)
       # for the __Host-session cookie.

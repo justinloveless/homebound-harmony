@@ -3,6 +3,8 @@ import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { lookup } from 'node:dns/promises';
+import net from 'node:net';
 import { authRouter } from './routes/auth';
 import { workspaceRouter } from './routes/workspace';
 import { snapshotRouter } from './routes/snapshot';
@@ -97,6 +99,55 @@ function isTransientDbError(err: unknown): boolean {
   return typeof e.message === 'string' && /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|Failed to connect/i.test(e.message);
 }
 
+type ParsedDbTarget = { host: string; port: number; database: string };
+
+function getDbTarget(): ParsedDbTarget | null {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return {
+      host: u.hostname || 'postgres',
+      port: Number(u.port || 5432),
+      database: u.pathname.replace(/^\//, '') || '<none>',
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function tcpProbe(host: string, port: number, timeoutMs = 1500): Promise<string> {
+  return await new Promise((resolve) => {
+    const socket = net.createConnection({ host, port });
+    const done = (result: string) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(result);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => done('ok'));
+    socket.once('timeout', () => done(`timeout (${timeoutMs}ms)`));
+    socket.once('error', (err) => done(`error: ${(err as Error).message}`));
+  });
+}
+
+async function logDbConnectivitySnapshot(): Promise<void> {
+  const target = getDbTarget();
+  if (!target) {
+    console.warn('DB connectivity check skipped: DATABASE_URL is missing or invalid');
+    return;
+  }
+
+  const dnsResult = await lookup(target.host, { all: true }).then(
+    (records) => records.map((r) => `${r.address}/${r.family}`).join(', ') || 'no records',
+    (err) => `dns error: ${(err as Error).message}`,
+  );
+  const probe = await tcpProbe(target.host, target.port);
+  console.warn(
+    `DB connectivity snapshot host=${target.host} port=${target.port} db=${target.database} dns=[${dnsResult}] tcp=${probe}`,
+  );
+}
+
 async function runMigrationsWithRetry(): Promise<void> {
   const attempts = Number(process.env.MIGRATION_RETRIES ?? 20);
   const delayMs = Number(process.env.MIGRATION_RETRY_DELAY_MS ?? 3000);
@@ -107,6 +158,7 @@ async function runMigrationsWithRetry(): Promise<void> {
     } catch (err) {
       const retryable = isTransientDbError(err);
       if (!retryable || attempt === attempts) throw err;
+      await logDbConnectivitySnapshot();
       console.warn(
         `Migration attempt ${attempt}/${attempts} failed; retrying in ${delayMs}ms`,
         err,
