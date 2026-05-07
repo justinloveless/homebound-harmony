@@ -10,7 +10,7 @@ import { workspaceRouter } from './routes/workspace';
 import { snapshotRouter } from './routes/snapshot';
 import { eventsRouter } from './routes/events';
 import { shareRouter, shareDataHandler } from './routes/share';
-import { runMigrations } from './db/migrate';
+import { resolveDatabaseUrl, runMigrations } from './db/migrate';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -102,9 +102,8 @@ function isTransientDbError(err: unknown): boolean {
 type ParsedDbTarget = { host: string; port: number; database: string };
 
 function getDbTarget(): ParsedDbTarget | null {
-  const raw = process.env.DATABASE_URL;
-  if (!raw) return null;
   try {
+    const raw = resolveDatabaseUrl();
     const u = new URL(raw);
     return {
       host: u.hostname || 'postgres',
