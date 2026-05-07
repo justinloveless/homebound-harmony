@@ -157,8 +157,12 @@ final class CryptoService {
             throw CryptoError.openFailed(error)
         }
 
+        // Own a contiguous copy before decoding — avoids rare EXC_BAD_ACCESS if `plaintext`
+        // were ever backed by memory that CryptoKit reclaims before JSONDecoder finishes.
+        let jsonData = Data(plaintext)
+
         do {
-            return try JSONDecoder().decode(Workspace.self, from: plaintext)
+            return try JSONDecoder().decode(Workspace.self, from: jsonData)
         } catch {
             throw CryptoError.decodingFailed(error)
         }

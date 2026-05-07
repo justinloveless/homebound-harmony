@@ -5,6 +5,8 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { authRouter } from './routes/auth';
 import { workspaceRouter } from './routes/workspace';
+import { snapshotRouter } from './routes/snapshot';
+import { eventsRouter } from './routes/events';
 import { shareRouter, shareDataHandler } from './routes/share';
 import { runMigrations } from './db/migrate';
 
@@ -39,6 +41,8 @@ app.get('/healthz', (c) => c.text('ok'));
 
 app.route('/api/auth', authRouter);
 app.route('/api/workspace', workspaceRouter);
+app.route('/api/snapshot', snapshotRouter);
+app.route('/api/events', eventsRouter);
 app.route('/api/share', shareRouter);
 
 // Public share data endpoint — anyone with the URL fragment key can read.

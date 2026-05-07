@@ -21,6 +21,11 @@ final class ArrivalVerificationService: NSObject, CLLocationManagerDelegate {
         return distance <= radiusMeters ? .verified : .outsideRadius(distanceMeters: distance)
     }
 
+    /// One-shot fix for audit / visit events (same pipeline as verify arrival).
+    func captureLocation() async -> CLLocation? {
+        await oneShotLocation()
+    }
+
     private func oneShotLocation() async -> CLLocation? {
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters

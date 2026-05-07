@@ -5,6 +5,8 @@ struct VisitCheckInResult {
     let visitIndex: Int
     let state: VisitRuntimeState
     let verification: ArrivalVerificationResult
+    /// `true` when this call created a new checked-in state (not an idempotent return of an existing check-in).
+    let isNewCheckIn: Bool
 }
 
 enum VisitCheckInError: LocalizedError {
@@ -41,7 +43,9 @@ final class VisitCheckInEngine {
         guard let client = clients.first(where: { $0.id == visit.clientId }) else { return nil }
         let existing = store.state(for: day.date, visitIndex: idx)
         if let existing, !existing.isCompleted {
-            return VisitCheckInResult(dayDate: day.date, visitIndex: idx, state: existing, verification: .verified)
+            return VisitCheckInResult(
+                dayDate: day.date, visitIndex: idx, state: existing, verification: .verified, isNewCheckIn: false
+            )
         }
 
         let verification: ArrivalVerificationResult
@@ -70,7 +74,9 @@ final class VisitCheckInEngine {
             completedAt: nil
         )
         store.upsert(state)
-        return VisitCheckInResult(dayDate: day.date, visitIndex: idx, state: state, verification: verification)
+        return VisitCheckInResult(
+            dayDate: day.date, visitIndex: idx, state: state, verification: verification, isNewCheckIn: true
+        )
     }
 
     func checkInVisit(
@@ -87,7 +93,13 @@ final class VisitCheckInEngine {
         guard let client = clients.first(where: { $0.id == visit.clientId }) else { return nil }
         let existing = store.state(for: day.date, visitIndex: visitIndex)
         if let existing, !existing.isCompleted {
-            return VisitCheckInResult(dayDate: day.date, visitIndex: visitIndex, state: existing, verification: .verified)
+            return VisitCheckInResult(
+                dayDate: day.date,
+                visitIndex: visitIndex,
+                state: existing,
+                verification: .verified,
+                isNewCheckIn: false
+            )
         }
 
         let verification: ArrivalVerificationResult
@@ -116,11 +128,17 @@ final class VisitCheckInEngine {
             completedAt: nil
         )
         store.upsert(state)
-        return VisitCheckInResult(dayDate: day.date, visitIndex: visitIndex, state: state, verification: verification)
+        return VisitCheckInResult(
+            dayDate: day.date,
+            visitIndex: visitIndex,
+            state: state,
+            verification: verification,
+            isNewCheckIn: true
+        )
     }
 
-    func markVisitCompleted(dayDate: String, visitIndex: Int) {
-        store.markCompleted(dayDate: dayDate, visitIndex: visitIndex)
+    func markVisitCompleted(dayDate: String, visitIndex: Int, at date: Date = Date()) {
+        store.markCompleted(dayDate: dayDate, visitIndex: visitIndex, at: date)
     }
 
     func state(for dayDate: String, visitIndex: Int) -> VisitRuntimeState? {

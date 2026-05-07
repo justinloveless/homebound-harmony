@@ -59,6 +59,11 @@ final class VisitRuntimeStore {
         defaults.removeObject(forKey: SharedStoreKeys.runtimeState)
     }
 
+    /// Replace all persisted visit rows (used after replaying `visit_*` events from the server log).
+    func replaceAll(with states: [VisitRuntimeState]) {
+        save(states: states)
+    }
+
     private func save(states: [VisitRuntimeState]) {
         let snapshot = VisitRuntimeSnapshot(states: states.sorted { $0.checkedInAt < $1.checkedInAt })
         guard let data = try? encoder.encode(snapshot) else { return }

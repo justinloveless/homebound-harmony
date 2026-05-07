@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { db } from '../db/client';
-import { users, workspaceBlobs, auditEvents } from '../db/schema';
+import { users, workspaceSnapshots, userEventChain, auditEvents } from '../db/schema';
 import { and, eq } from 'drizzle-orm';
 import { hashPassword, verifyPassword, encryptTotpSecret, decryptTotpSecret } from '../auth/argon';
 import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/totp';
@@ -91,11 +91,11 @@ auth.post('/register', async (c) => {
       mfaDisabled: false,
       updatedAt: new Date(),
     }).where(eq(users.id, userId));
-    await db.update(workspaceBlobs).set({
+    await db.update(workspaceSnapshots).set({
       wrappedWorkspaceKey,
       wrappedWorkspaceKeyRecovery,
       updatedAt: new Date(),
-    }).where(eq(workspaceBlobs.userId, userId));
+    }).where(eq(workspaceSnapshots.userId, userId));
   } else {
     const [user] = await db.insert(users).values({
       email: normalizedEmail,
@@ -105,11 +105,12 @@ auth.post('/register', async (c) => {
     }).returning({ id: users.id });
     userId = user.id;
 
-    await db.insert(workspaceBlobs).values({
+    await db.insert(workspaceSnapshots).values({
       userId,
       wrappedWorkspaceKey,
       wrappedWorkspaceKeyRecovery,
     });
+    await db.insert(userEventChain).values({ userId, headSeq: 0, headHash: '' }).onConflictDoNothing();
   }
 
   const registrationToken = createRegToken(userId);
@@ -216,6 +217,7 @@ auth.post('/logout', requireUser, async (c) => {
 // GET /api/auth/me
 auth.get('/me', requireUser, async (c) => {
   const user = (c as any).get('user') as typeof users.$inferSelect;
+  c.header('X-Min-Client-Version', process.env.MIN_CLIENT_VERSION ?? '2026.5.6');
   return c.json({
     id: user.id,
     email: user.email,
@@ -242,9 +244,9 @@ auth.post('/password/change', requireUser, async (c) => {
 
   const newHash = await hashPassword(newPassword);
   await db.update(users).set({ passwordHash: newHash, pdkSalt: newPdkSalt, updatedAt: new Date() }).where(eq(users.id, user.id));
-  await db.update(workspaceBlobs)
+  await db.update(workspaceSnapshots)
     .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, wrappedWorkspaceKeyRecovery: newWrappedWorkspaceKeyRecovery, updatedAt: new Date() })
-    .where(eq(workspaceBlobs.userId, user.id));
+    .where(eq(workspaceSnapshots.userId, user.id));
 
   await logEvent({ action: 'password_change', userId: user.id, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ success: true });
@@ -269,7 +271,7 @@ auth.post('/recovery/init', async (c) => {
     return c.json({ error: 'Invalid recovery info' }, 401);
   }
 
-  const blobs = await db.select().from(workspaceBlobs).where(eq(workspaceBlobs.userId, user.id));
+  const blobs = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.userId, user.id));
   const blob = blobs[0];
   if (!blob) return c.json({ error: 'Workspace missing' }, 500);
 
@@ -304,9 +306,9 @@ auth.post('/recovery', async (c) => {
   await db.update(users)
     .set({ passwordHash: newHash, pdkSalt: newPdkSalt, updatedAt: new Date() })
     .where(eq(users.id, user.id));
-  await db.update(workspaceBlobs)
+  await db.update(workspaceSnapshots)
     .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, updatedAt: new Date() })
-    .where(eq(workspaceBlobs.userId, user.id));
+    .where(eq(workspaceSnapshots.userId, user.id));
 
   await logEvent({ action: 'recovery_used', userId: user.id, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ success: true });

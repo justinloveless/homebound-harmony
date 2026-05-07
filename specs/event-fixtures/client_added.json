@@ -1,0 +1,65 @@
+{
+  "name": "client_added",
+  "snapshotBefore": {
+    "version": 1,
+    "worker": {
+      "name": "",
+      "homeAddress": "",
+      "workingHours": { "startTime": "08:00", "endTime": "17:00" },
+      "daysOff": ["saturday", "sunday"],
+      "makeUpDays": [],
+      "breaks": [{ "startTime": "12:00", "endTime": "13:00", "label": "Lunch" }],
+      "schedulingStrategy": "spread"
+    },
+    "clients": [],
+    "travelTimes": {},
+    "travelTimeErrors": {},
+    "lastSchedule": null
+  },
+  "events": [
+    {
+      "clientEventId": "evt-1",
+      "kind": "client_added",
+      "payload": {
+        "id": "c1",
+        "name": "Alice",
+        "address": "1 Main",
+        "visitDurationMinutes": 60,
+        "visitsPerPeriod": 1,
+        "period": "week",
+        "priority": "medium",
+        "timeWindows": [],
+        "notes": ""
+      },
+      "claimedAt": "2026-01-01T12:00:00.000Z"
+    }
+  ],
+  "snapshotAfter": {
+    "version": 1,
+    "worker": {
+      "name": "",
+      "homeAddress": "",
+      "workingHours": { "startTime": "08:00", "endTime": "17:00" },
+      "daysOff": ["saturday", "sunday"],
+      "makeUpDays": [],
+      "breaks": [{ "startTime": "12:00", "endTime": "13:00", "label": "Lunch" }],
+      "schedulingStrategy": "spread"
+    },
+    "clients": [
+      {
+        "id": "c1",
+        "name": "Alice",
+        "address": "1 Main",
+        "visitDurationMinutes": 60,
+        "visitsPerPeriod": 1,
+        "period": "week",
+        "priority": "medium",
+        "timeWindows": [],
+        "notes": ""
+      }
+    ],
+    "travelTimes": {},
+    "travelTimeErrors": {},
+    "lastSchedule": null
+  }
+}

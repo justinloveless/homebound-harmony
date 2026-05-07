@@ -15,6 +15,13 @@
       "when": 1778090884104,
       "tag": "0001_clever_microchip",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0002_event_log",
+      "breakpoints": true
     }
   ]
 }

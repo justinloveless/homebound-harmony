@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { AppUpdateGate } from "@/components/AppUpdateGate";
 import { AuthGuard, PublicOnly } from "@/components/AuthGuard";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { AppLayout } from "@/components/AppLayout";
@@ -47,6 +48,7 @@ const App = () => (
       <Sonner />
       <AuthProvider>
         <BrowserRouter>
+          <AppUpdateGate>
           <Routes>
             <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
             <Route path="/register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
@@ -55,6 +57,7 @@ const App = () => (
             <Route path="/s/:id" element={<SharePublicPage />} />
             <Route path="/*" element={<ProtectedShell />} />
           </Routes>
+          </AppUpdateGate>
         </BrowserRouter>
       </AuthProvider>
     </TooltipProvider>

@@ -1,86 +1,26 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { loadWorkspace as loadCached, saveWorkspace as saveCached } from '@/lib/storage';
-import { type Workspace, type Client, type WorkerProfile, type TravelTimeMatrix, type TravelTimeErrors, type WeekSchedule, type SavedSchedule, DEFAULT_WORKSPACE, travelKey, estimateTravelMinutes, type Coords } from '@/types/models';
+import {
+  type Workspace,
+  type Client,
+  type WorkerProfile,
+  type TravelTimeMatrix,
+  type TravelTimeErrors,
+  type WeekSchedule,
+  type SavedSchedule,
+  DEFAULT_WORKSPACE,
+  travelKey,
+} from '@/types/models';
 import { getDistanceForNewLocation } from '@/lib/google-maps';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { pullWorkspace, pushWorkspace, subscribeWorkspaceUpdates, WorkspaceConflictError } from '@/lib/sync';
-
-/** Recalculate travel times for all location pairs that have coordinates */
-function recalcTravelTimes(ws: Workspace): TravelTimeMatrix {
-  const matrix = { ...ws.travelTimes };
-  const locations: { id: string; coords?: Coords }[] = [
-    { id: 'home', coords: ws.worker.homeCoords },
-    ...ws.clients.map(c => ({ id: c.id, coords: c.coords })),
-  ];
-  for (let i = 0; i < locations.length; i++) {
-    for (let j = i + 1; j < locations.length; j++) {
-      const a = locations[i], b = locations[j];
-      if (a.coords && b.coords) {
-        matrix[travelKey(a.id, b.id)] = estimateTravelMinutes(a.coords, b.coords);
-      }
-    }
-  }
-  return matrix;
-}
-
-async function calcGoogleTravelForClient(
-  clientId: string,
-  clientAddress: string,
-  workspace: Workspace,
-  persist: (ws: Workspace) => void,
-  setWorkspace: React.Dispatch<React.SetStateAction<Workspace>>,
-) {
-  if (!clientAddress.trim()) return;
-
-  const existingLocations: { id: string; address: string }[] = [];
-  if (workspace.worker.homeAddress.trim()) {
-    existingLocations.push({ id: 'home', address: workspace.worker.homeAddress });
-  }
-  for (const c of workspace.clients) {
-    if (c.id !== clientId && c.address.trim()) {
-      existingLocations.push({ id: c.id, address: c.address });
-    }
-  }
-
-  if (existingLocations.length === 0) return;
-
-  try {
-    const { toResults, fromResults } = await getDistanceForNewLocation(
-      clientAddress,
-      existingLocations.map(l => l.address),
-    );
-
-    setWorkspace(prev => {
-      const updated = { ...prev.travelTimes };
-      const errors = { ...(prev.travelTimeErrors ?? {}) };
-
-      for (let i = 0; i < existingLocations.length; i++) {
-        const key = travelKey(clientId, existingLocations[i].id);
-        const to = toResults[i];
-        const from = fromResults[i];
-        if (to !== null && from !== null) {
-          updated[key] = Math.round((to + from) / 2);
-          delete errors[key];
-        } else if (to !== null) {
-          updated[key] = to;
-          delete errors[key];
-        } else if (from !== null) {
-          updated[key] = from;
-          delete errors[key];
-        } else {
-          errors[key] = 'Google Maps could not calculate this route';
-        }
-      }
-
-      const next = { ...prev, travelTimes: updated, travelTimeErrors: errors };
-      persist(next);
-      return next;
-    });
-  } catch (err) {
-    console.error('Auto travel time calc failed:', err);
-  }
-}
+import { pullWorkspace, subscribeEventStream, maybeRollupSnapshot } from '@/lib/sync';
+import { applyEvent } from '@/lib/events';
+import { enqueueEvent, drainOutbox } from '@/lib/outbox';
+import type { Event } from '@/types/events';
+import { isClinicalKind } from '@/types/events';
+import type { EventGps } from '@/types/events';
+import { useGeolocation } from '@/hooks/useGeolocation';
 
 interface WorkspaceContextValue {
   workspace: Workspace;
@@ -105,15 +45,24 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const wk = auth.workspaceKey;
+  const geo = useGeolocation();
   const [workspace, setWorkspace] = useState<Workspace>(DEFAULT_WORKSPACE);
   const [loading, setLoading] = useState(true);
 
-  // Serialized push chain. Each persist() chains onto the previous push so
-  // the version we send to the server is always monotonically increasing.
-  const versionRef = useRef<number>(0);
-  const pushChainRef = useRef<Promise<void>>(Promise.resolve());
+  const versionRef = useRef(0);
+  const snapshotSeqRef = useRef(0);
+  const workspaceRef = useRef(workspace);
+  const syncChainRef = useRef<Promise<void>>(Promise.resolve());
 
-  // Pull on auth ready, fall back to IndexedDB cache when offline.
+  useEffect(() => {
+    workspaceRef.current = workspace;
+  }, [workspace]);
+
+  useEffect(() => {
+    geo.startWatching();
+    return () => geo.stopWatching();
+  }, [geo]);
+
   useEffect(() => {
     if (!wk) return;
     let cancelled = false;
@@ -121,12 +70,14 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       try {
         const cached = await loadCached();
         if (!cancelled) setWorkspace(cached);
-      } catch { /* first run, no cache yet */ }
+      } catch { /* */ }
       try {
         const fresh = await pullWorkspace(wk);
         if (cancelled) return;
         setWorkspace(fresh.workspace);
+        workspaceRef.current = fresh.workspace;
         versionRef.current = fresh.version;
+        snapshotSeqRef.current = fresh.snapshotSeq;
       } catch (err) {
         console.warn('Workspace pull failed, using cache', err);
       } finally {
@@ -136,155 +87,347 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, [wk]);
 
-  // SSE: another device pushed a new version → pull and replace.
   useEffect(() => {
     if (!wk) return;
-    const unsubscribe = subscribeWorkspaceUpdates(async (msg) => {
-      if (msg.version <= versionRef.current) return;
+    const unsub = subscribeEventStream(async () => {
       try {
         const fresh = await pullWorkspace(wk);
         setWorkspace(fresh.workspace);
+        workspaceRef.current = fresh.workspace;
         versionRef.current = fresh.version;
+        snapshotSeqRef.current = fresh.snapshotSeq;
         toast.info('Workspace updated from another device');
       } catch (err) {
-        console.warn('SSE-triggered pull failed', err);
+        console.warn('Event stream pull failed', err);
       }
     });
-    return unsubscribe;
+    return unsub;
   }, [wk]);
 
-  const persist = useCallback((ws: Workspace) => {
-    saveCached(ws);
-    if (!wk) return;
-    pushChainRef.current = pushChainRef.current.then(async () => {
-      try {
-        const newVersion = await pushWorkspace(ws, wk, versionRef.current);
-        versionRef.current = newVersion;
-      } catch (err) {
-        if (err instanceof WorkspaceConflictError) {
-          try {
-            const fresh = await pullWorkspace(wk);
-            setWorkspace(fresh.workspace);
-            versionRef.current = fresh.version;
-            toast.warning('Workspace was updated on another device — local view refreshed');
-          } catch (pullErr) {
-            console.error('Conflict pull failed', pullErr);
+  const runSync = useCallback((fn: () => Promise<void>) => {
+    syncChainRef.current = syncChainRef.current.then(fn).catch((e) => {
+      console.error('sync chain', e);
+    });
+  }, []);
+
+  const applyAndPersist = useCallback((next: Workspace) => {
+    workspaceRef.current = next;
+    setWorkspace(next);
+    void saveCached(next);
+  }, []);
+
+  const pushEncrypted = useCallback(
+    async (ev: Event, gps: EventGps | null) => {
+      if (!wk) return;
+      await enqueueEvent(ev, wk, gps);
+      await drainOutbox();
+      versionRef.current = await maybeRollupSnapshot(workspaceRef.current, wk, versionRef.current);
+    },
+    [wk],
+  );
+
+  /** Apply event locally and upload; resolves GPS for clinical kinds first. */
+  const dispatch = useCallback(
+    (ev: Event) => {
+      runSync(async () => {
+        let finalEv = ev;
+        let gps: EventGps | null = null;
+        if (isClinicalKind(ev.kind)) {
+          gps = await geo.ensureClinicalFix();
+          if (!gps) {
+            toast.error('Location access is required for client changes.');
+            return;
           }
-        } else {
-          console.error('Workspace push failed', err);
+          finalEv = { ...ev, gps };
+        }
+        const next = applyEvent(workspaceRef.current, finalEv);
+        applyAndPersist(next);
+        if (!wk) return;
+        await pushEncrypted(finalEv, gps);
+      });
+    },
+    [wk, geo, applyAndPersist, runSync, pushEncrypted],
+  );
+
+  const calcGoogleTravelForClient = useCallback(
+    async (clientId: string, clientAddress: string) => {
+      if (!clientAddress.trim() || !wk) return;
+
+      const baseWs = workspaceRef.current;
+      const existingLocations: { id: string; address: string }[] = [];
+      if (baseWs.worker.homeAddress.trim()) {
+        existingLocations.push({ id: 'home', address: baseWs.worker.homeAddress });
+      }
+      for (const c of baseWs.clients) {
+        if (c.id !== clientId && c.address.trim()) {
+          existingLocations.push({ id: c.id, address: c.address });
         }
       }
-    });
-  }, [wk]);
+      if (existingLocations.length === 0) return;
 
-  const updateWorker = useCallback((worker: WorkerProfile) => {
-    setWorkspace(prev => {
-      const next = { ...prev, worker };
-      next.travelTimes = recalcTravelTimes(next);
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+      try {
+        const { toResults, fromResults } = await getDistanceForNewLocation(
+          clientAddress,
+          existingLocations.map(l => l.address),
+        );
 
-  const setClients = useCallback((clients: Client[]) => {
-    setWorkspace(prev => { const next = { ...prev, clients }; persist(next); return next; });
-  }, [persist]);
+        const prev = workspaceRef.current;
+        const updated = { ...prev.travelTimes };
+        const errors = { ...(prev.travelTimeErrors ?? {}) };
 
-  const addClient = useCallback((client: Client) => {
-    setWorkspace(prev => {
-      const next = { ...prev, clients: [...prev.clients, client] };
-      next.travelTimes = recalcTravelTimes(next);
-      persist(next);
-      calcGoogleTravelForClient(client.id, client.address, next, persist, setWorkspace);
-      return next;
-    });
-  }, [persist]);
+        for (let i = 0; i < existingLocations.length; i++) {
+          const key = travelKey(clientId, existingLocations[i].id);
+          const to = toResults[i];
+          const from = fromResults[i];
+          if (to !== null && from !== null) {
+            updated[key] = Math.round((to + from) / 2);
+            delete errors[key];
+          } else if (to !== null) {
+            updated[key] = to;
+            delete errors[key];
+          } else if (from !== null) {
+            updated[key] = from;
+            delete errors[key];
+          } else {
+            errors[key] = 'Google Maps could not calculate this route';
+          }
+        }
 
-  const updateClient = useCallback((client: Client) => {
-    setWorkspace(prev => {
-      const oldClient = prev.clients.find(c => c.id === client.id);
-      const next = { ...prev, clients: prev.clients.map(c => c.id === client.id ? client : c) };
-      next.travelTimes = recalcTravelTimes(next);
-      persist(next);
-      if (oldClient && oldClient.address !== client.address) {
-        calcGoogleTravelForClient(client.id, client.address, next, persist, setWorkspace);
+        const next = { ...prev, travelTimes: updated, travelTimeErrors: errors };
+        applyAndPersist(next);
+
+        const evTimes: Event = {
+          clientEventId: crypto.randomUUID(),
+          kind: 'travel_times_set',
+          payload: updated,
+          claimedAt: new Date().toISOString(),
+        };
+        const evErr: Event = {
+          clientEventId: crypto.randomUUID(),
+          kind: 'travel_time_errors_set',
+          payload: errors,
+          claimedAt: new Date().toISOString(),
+        };
+        await pushEncrypted(evTimes, null);
+        await pushEncrypted(evErr, null);
+      } catch (err) {
+        console.error('Auto travel time calc failed:', err);
       }
-      return next;
-    });
-  }, [persist]);
+    },
+    [wk, applyAndPersist, pushEncrypted],
+  );
 
-  const removeClient = useCallback((id: string) => {
-    setWorkspace(prev => {
-      const next = { ...prev, clients: prev.clients.filter(c => c.id !== id) };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const updateWorker = useCallback(
+    (worker: WorkerProfile) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'worker_updated',
+        payload: worker,
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
 
-  const setTravelTimes = useCallback((travelTimes: TravelTimeMatrix) => {
-    setWorkspace(prev => { const next = { ...prev, travelTimes }; persist(next); return next; });
-  }, [persist]);
+  const setClients = useCallback(
+    (clients: Client[]) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'clients_set',
+        payload: clients,
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
 
-  const setTravelTimeErrors = useCallback((travelTimeErrors: TravelTimeErrors) => {
-    setWorkspace(prev => { const next = { ...prev, travelTimeErrors }; persist(next); return next; });
-  }, [persist]);
+  const addClient = useCallback(
+    (client: Client) => {
+      runSync(async () => {
+        const gps = await geo.ensureClinicalFix();
+        if (!gps) {
+          toast.error('Location access is required to add a client.');
+          return;
+        }
+        const ev: Event = {
+          clientEventId: crypto.randomUUID(),
+          kind: 'client_added',
+          payload: client,
+          claimedAt: new Date().toISOString(),
+          gps,
+        };
+        const next = applyEvent(workspaceRef.current, ev);
+        applyAndPersist(next);
+        if (wk) await pushEncrypted(ev, gps);
+        await calcGoogleTravelForClient(client.id, client.address);
+      });
+    },
+    [wk, geo, applyAndPersist, runSync, pushEncrypted, calcGoogleTravelForClient],
+  );
 
-  const setSchedule = useCallback((lastSchedule: WeekSchedule | null) => {
-    setWorkspace(prev => { const next = { ...prev, lastSchedule }; persist(next); return next; });
-  }, [persist]);
+  const updateClient = useCallback(
+    (client: Client) => {
+      const old = workspaceRef.current.clients.find(c => c.id === client.id);
+      runSync(async () => {
+        const gps = await geo.ensureClinicalFix();
+        if (!gps) {
+          toast.error('Location access is required to update a client.');
+          return;
+        }
+        const ev: Event = {
+          clientEventId: crypto.randomUUID(),
+          kind: 'client_updated',
+          payload: client,
+          claimedAt: new Date().toISOString(),
+          gps,
+        };
+        const next = applyEvent(workspaceRef.current, ev);
+        applyAndPersist(next);
+        if (wk) await pushEncrypted(ev, gps);
+        if (old && old.address !== client.address) {
+          await calcGoogleTravelForClient(client.id, client.address);
+        }
+      });
+    },
+    [wk, geo, applyAndPersist, runSync, pushEncrypted, calcGoogleTravelForClient],
+  );
 
-  const replaceWorkspace = useCallback((ws: Workspace) => {
-    setWorkspace(ws);
-    persist(ws);
-  }, [persist]);
+  const removeClient = useCallback(
+    (id: string) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'client_removed',
+        payload: { id },
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
 
-  const saveSchedule = useCallback((name: string) => {
-    setWorkspace(prev => {
-      if (!prev.lastSchedule) return prev;
+  const setTravelTimes = useCallback(
+    (travelTimes: TravelTimeMatrix) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'travel_times_set',
+        payload: travelTimes,
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
+
+  const setTravelTimeErrors = useCallback(
+    (travelTimeErrors: TravelTimeErrors) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'travel_time_errors_set',
+        payload: travelTimeErrors,
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
+
+  const setSchedule = useCallback(
+    (lastSchedule: WeekSchedule | null) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'schedule_set',
+        payload: lastSchedule,
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
+
+  const replaceWorkspace = useCallback(
+    (ws: Workspace) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'workspace_imported',
+        payload: ws,
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
+
+  const saveSchedule = useCallback(
+    (name: string) => {
+      const prev = workspaceRef.current;
+      if (!prev.lastSchedule) return;
       const saved: SavedSchedule = {
         id: crypto.randomUUID(),
         name,
         savedAt: new Date().toISOString(),
-        schedule: prev.lastSchedule!,
+        schedule: prev.lastSchedule,
       };
-      const next = { ...prev, savedSchedules: [...(prev.savedSchedules ?? []), saved] };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'saved_schedule_added',
+        payload: saved,
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
 
-  const loadSavedSchedule = useCallback((id: string) => {
-    setWorkspace(prev => {
-      const saved = (prev.savedSchedules ?? []).find(s => s.id === id);
-      if (!saved) return prev;
-      const next = { ...prev, lastSchedule: saved.schedule };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const loadSavedSchedule = useCallback(
+    (id: string) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'saved_schedule_loaded',
+        payload: { id },
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
 
-  const deleteSavedSchedule = useCallback((id: string) => {
-    setWorkspace(prev => {
-      const next = { ...prev, savedSchedules: (prev.savedSchedules ?? []).filter(s => s.id !== id) };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const deleteSavedSchedule = useCallback(
+    (id: string) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'saved_schedule_removed',
+        payload: { id },
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
 
-  const renameSavedSchedule = useCallback((id: string, name: string) => {
-    setWorkspace(prev => {
-      const next = { ...prev, savedSchedules: (prev.savedSchedules ?? []).map(s => s.id === id ? { ...s, name } : s) };
-      persist(next);
-      return next;
-    });
-  }, [persist]);
+  const renameSavedSchedule = useCallback(
+    (id: string, name: string) => {
+      dispatch({
+        clientEventId: crypto.randomUUID(),
+        kind: 'saved_schedule_renamed',
+        payload: { id, name },
+        claimedAt: new Date().toISOString(),
+      });
+    },
+    [dispatch],
+  );
 
   return (
-    <WorkspaceContext.Provider value={{
-      workspace, loading, updateWorker, setClients, addClient, updateClient,
-      removeClient, setTravelTimes, setTravelTimeErrors, setSchedule, replaceWorkspace,
-      saveSchedule, loadSavedSchedule, deleteSavedSchedule, renameSavedSchedule,
-    }}>
+    <WorkspaceContext.Provider
+      value={{
+        workspace,
+        loading,
+        updateWorker,
+        setClients,
+        addClient,
+        updateClient,
+        removeClient,
+        setTravelTimes,
+        setTravelTimeErrors,
+        setSchedule,
+        replaceWorkspace,
+        saveSchedule,
+        loadSavedSchedule,
+        deleteSavedSchedule,
+        renameSavedSchedule,
+      }}
+    >
       {children}
     </WorkspaceContext.Provider>
   );

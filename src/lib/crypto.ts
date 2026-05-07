@@ -74,9 +74,11 @@ async function deriveKeyBytes(password: string, saltB64: string): Promise<Uint8A
 }
 
 async function importAesKey(raw: Uint8Array, usages: KeyUsage[]): Promise<CryptoKey> {
-  // Copy into a dedicated ArrayBuffer to satisfy strict WebCrypto typings.
-  const buf = raw.slice().buffer;
-  return crypto.subtle.importKey('raw', buf, { name: 'AES-GCM' }, false, usages);
+  // Copy into a standalone buffer — `raw.buffer` may be oversized (subarray/slice views),
+  // which breaks `importKey` in Node/jsdom WebCrypto.
+  const copy = new Uint8Array(raw.byteLength);
+  copy.set(raw);
+  return crypto.subtle.importKey('raw', copy, { name: 'AES-GCM' }, false, usages);
 }
 
 export async function derivePdk(password: string, saltB64: string): Promise<CryptoKey> {

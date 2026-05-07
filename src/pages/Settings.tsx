@@ -262,7 +262,7 @@ function ChangePasswordCard({ pdkSalt, workspaceKey }: ChangePasswordProps) {
       // combination still unwraps WK because the WK itself didn't change.
       // (The plan calls out that password change re-wraps WK, not the
       // recovery envelope.)
-      const blob = await api.get<{ wrappedWorkspaceKeyRecovery: string }>('/api/workspace');
+      const blob = await api.get<{ wrappedWorkspaceKeyRecovery: string }>('/api/snapshot');
 
       await api.post('/api/auth/password/change', {
         currentPassword,

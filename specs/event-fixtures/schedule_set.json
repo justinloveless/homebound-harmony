@@ -1,0 +1,53 @@
+{
+  "name": "schedule_set",
+  "snapshotBefore": {
+    "version": 1,
+    "worker": {
+      "name": "",
+      "homeAddress": "",
+      "workingHours": { "startTime": "08:00", "endTime": "17:00" },
+      "daysOff": ["saturday", "sunday"],
+      "makeUpDays": [],
+      "breaks": [{ "startTime": "12:00", "endTime": "13:00", "label": "Lunch" }],
+      "schedulingStrategy": "spread"
+    },
+    "clients": [],
+    "travelTimes": {},
+    "travelTimeErrors": {},
+    "lastSchedule": null
+  },
+  "events": [
+    {
+      "clientEventId": "evt-sch-1",
+      "kind": "schedule_set",
+      "payload": {
+        "weekStartDate": "2026-05-04",
+        "days": [],
+        "totalTravelMinutes": 0,
+        "totalTimeAwayMinutes": 0
+      },
+      "claimedAt": "2026-01-01T12:00:00.000Z"
+    }
+  ],
+  "snapshotAfter": {
+    "version": 1,
+    "worker": {
+      "name": "",
+      "homeAddress": "",
+      "workingHours": { "startTime": "08:00", "endTime": "17:00" },
+      "daysOff": ["saturday", "sunday"],
+      "makeUpDays": [],
+      "breaks": [{ "startTime": "12:00", "endTime": "13:00", "label": "Lunch" }],
+      "schedulingStrategy": "spread"
+    },
+    "clients": [],
+    "travelTimes": {},
+    "travelTimeErrors": {},
+    "lastSchedule": {
+      "weekStartDate": "2026-05-04",
+      "days": [],
+      "totalTravelMinutes": 0,
+      "totalTimeAwayMinutes": 0
+    }
+  }
+}

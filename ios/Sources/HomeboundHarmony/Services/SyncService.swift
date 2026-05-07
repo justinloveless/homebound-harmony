@@ -1,21 +1,17 @@
 import Foundation
 import CryptoKit
 
-// Mirrors the pull / push logic in src/lib/sync.ts.
-// The server holds a versioned encrypted blob; the iOS app uses
-// optimistic concurrency (If-Match) and re-pulls on 412 conflicts.
+// Pull: GET /api/snapshot + GET /api/events?since=snapshotSeq, decrypt, replay.
+// Push: POST /api/events with encrypted rows (replaces legacy PUT /api/workspace).
 
 enum SyncError: LocalizedError {
     case noWorkspaceKey
-    case conflict(serverVersion: Int)
     case serverError(Int)
 
     var errorDescription: String? {
         switch self {
         case .noWorkspaceKey:
             return "Workspace key not available. Please unlock the app."
-        case .conflict:
-            return "Your schedule was updated on another device. Refreshing..."
         case .serverError(let s):
             return "Server error (\(s)). Try again."
         }
@@ -27,45 +23,52 @@ final class SyncService {
     private let crypto: CryptoService
 
     init(api: APIService, crypto: CryptoService) {
-        self.api    = api
+        self.api = api
         self.crypto = crypto
     }
 
-    // MARK: - Pull
+    private var log: EventLogClient { EventLogClient(api: api, crypto: crypto) }
 
-    /// Fetches the encrypted blob and decrypts it with `key`.
-    /// Returns `nil` if the server blob is empty (new account).
-    func pull(key: SymmetricKey) async throws -> (workspace: Workspace?, version: Int) {
-        let blob: ServerBlob = try await api.get(path: "/api/workspace")
-        guard !blob.ciphertext.isEmpty, !blob.iv.isEmpty else {
-            return (nil, blob.version)
+    func pull(key: SymmetricKey) async throws -> (
+        workspace: Workspace?,
+        version: Int,
+        snapshotSeq: Int,
+        decryptedEvents: [[String: Any]]
+    ) {
+        let snap = try await log.getSnapshot()
+        var base: Workspace
+        if snap.ciphertext.isEmpty {
+            base = defaultWorkspace
+        } else {
+            base = try crypto.decryptWorkspace(
+                blob: EncryptedBlob(ciphertext: snap.ciphertext, iv: snap.iv),
+                key: key
+            )
         }
-        let ws = try crypto.decryptWorkspace(
-            blob: EncryptedBlob(ciphertext: blob.ciphertext, iv: blob.iv),
-            key: key
-        )
-        return (ws, blob.version)
+        let rows = try await log.getEvents(since: snap.snapshotSeq)
+        let dicts = try log.decryptEvents(rows, key: key)
+        let merged = try EventReducer.replay(base, events: dicts)
+        let wsOut: Workspace? = snap.ciphertext.isEmpty && dicts.isEmpty ? nil : merged
+        return (wsOut, snap.version, snap.snapshotSeq, dicts)
     }
 
-    // MARK: - Push
-
-    /// Encrypts `workspace` and uploads it. Returns the new server version.
-    /// Throws `SyncError.conflict` on 412 so the caller can re-pull and retry.
-    func push(workspace: Workspace, key: SymmetricKey, expectedVersion: Int) async throws -> Int {
-        let blob = try crypto.encryptWorkspace(workspace, key: key)
-        let body = PutWorkspaceRequest(ciphertext: blob.ciphertext, iv: blob.iv)
-        let headers = ["If-Match": "\"\(expectedVersion)\""]
-
-        do {
-            let res: PutWorkspaceResponse = try await api.put(
-                path: "/api/workspace",
-                body: body,
-                headers: headers
-            )
-            return res.version
-        } catch APIError.httpError(412, _) {
-            // Server has a newer version; caller should pull first.
-            throw SyncError.conflict(serverVersion: expectedVersion)
+    /// Encrypt + POST one or more events, then optionally rollup snapshot.
+    func pushEvents(
+        events: [[String: Any]],
+        key: SymmetricKey,
+        workspace: Workspace,
+        expectedVersion: Int
+    ) async throws -> Int {
+        let log = self.log
+        var wires: [[String: Any]] = []
+        for ev in events {
+            let kind = ev["kind"] as? String ?? ""
+            let clinical = ["client_added", "client_updated", "client_removed", "share_create", "visit_started", "visit_completed", "visit_note_added"].contains(kind)
+            wires.append(try log.buildWireRow(event: ev, key: key, isClinical: clinical))
         }
+        let body: [String: Any] = ["events": wires]
+        let _: PostEventsResponse = try await api.postJSONObject(path: "/api/events", object: body)
+        // Snapshot rollup (PUT /api/snapshot) is optional on mobile; server `version` advances only on rollup.
+        return expectedVersion
     }
 }

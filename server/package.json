@@ -5,7 +5,8 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "bun src/db/migrate.ts"
+    "db:migrate": "bun src/db/migrate.ts",
+    "audit:verify": "bun src/scripts/audit-verify.ts"
   },
   "dependencies": {
     "hono": "^4.6.0",

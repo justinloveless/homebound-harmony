@@ -62,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback(async (email: string, password: string, code?: string) => {
     const { pdkSalt } = await api.post<{ pdkSalt: string }>('/api/auth/login', { email, password, code });
     const meData = await api.get<AuthMe>('/api/auth/me');
-    const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/workspace');
+    const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/snapshot');
     const pdk = await derivePdk(password, pdkSalt);
     const wk = await unwrapKey(blob.wrappedWorkspaceKey, pdk);
     setMe(meData);
@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const unlock = useCallback(async (password: string) => {
     if (!me) throw new Error('No session to unlock');
-    const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/workspace');
+    const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/snapshot');
     const pdk = await derivePdk(password, me.pdkSalt);
     let wk: CryptoKey;
     try {

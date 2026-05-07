@@ -121,7 +121,7 @@ export default function RegisterPage() {
         code: totpCode.trim(),
       });
       const meData = await api.get<AuthMe>('/api/auth/me');
-      const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/workspace');
+      const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/snapshot');
       const pdk = await derivePdk(pending.password, pdkSalt);
       const wk = await unwrapKey(blob.wrappedWorkspaceKey, pdk);
       auth.setUnlockedSession(meData, wk);

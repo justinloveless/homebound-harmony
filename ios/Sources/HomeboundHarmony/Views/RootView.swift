@@ -20,9 +20,15 @@ struct RootView: View {
 
             case .authenticated:
                 MainTabView()
+
+            case .appUpdateRequired(let serverMin, let message):
+                UpdateRequiredView(serverMin: serverMin, message: message)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: appState.authState)
+        .onReceive(NotificationCenter.default.publisher(for: .appUpdateRequired)) { note in
+            appState.handleAppUpdateRequiredNotification(note)
+        }
         .onOpenURL { url in
             handleDeepLink(url)
         }

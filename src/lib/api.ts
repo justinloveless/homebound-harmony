@@ -3,7 +3,12 @@
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
 export class ApiError extends Error {
-  constructor(public status: number, public body: unknown, message?: string) {
+  constructor(
+    public status: number,
+    public body: unknown,
+    message?: string,
+    public needsAppUpdate?: boolean,
+  ) {
     super(message ?? `Request failed (${status})`);
     this.name = 'ApiError';
   }
@@ -46,7 +51,13 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
 
   if (!res.ok) {
     const msg = (parsed as any)?.error ?? `Request failed (${res.status})`;
-    throw new ApiError(res.status, parsed, msg);
+    const needsAppUpdate = res.status === 410;
+    if (needsAppUpdate && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('app:update-required', { detail: parsed }),
+      );
+    }
+    throw new ApiError(res.status, parsed, msg, needsAppUpdate);
   }
   return parsed as T;
 }
