@@ -41,9 +41,11 @@ ALTER TABLE "workspace_snapshots" ALTER COLUMN "workspace_id" SET NOT NULL;
 --> statement-breakpoint
 ALTER TABLE "workspace_snapshots" ADD COLUMN "key_epoch" integer DEFAULT 0 NOT NULL;
 --> statement-breakpoint
-ALTER TABLE "workspace_snapshots" DROP CONSTRAINT "workspace_snapshots_pkey";
+ALTER TABLE "workspace_snapshots" DROP CONSTRAINT IF EXISTS "workspace_snapshots_pkey";
+ALTER TABLE "workspace_snapshots" DROP CONSTRAINT IF EXISTS "workspace_blobs_pkey";
 --> statement-breakpoint
-ALTER TABLE "workspace_snapshots" DROP CONSTRAINT "workspace_snapshots_user_id_users_id_fk";
+ALTER TABLE "workspace_snapshots" DROP CONSTRAINT IF EXISTS "workspace_snapshots_user_id_users_id_fk";
+ALTER TABLE "workspace_snapshots" DROP CONSTRAINT IF EXISTS "workspace_blobs_user_id_users_id_fk";
 --> statement-breakpoint
 ALTER TABLE "workspace_snapshots" DROP COLUMN "user_id";
 --> statement-breakpoint
@@ -104,5 +106,3 @@ CREATE INDEX "data_events_workspace_id_seq_idx" ON "data_events" ("workspace_id"
 ALTER TABLE "data_events" ADD CONSTRAINT "data_events_author_user_id_users_id_fk" FOREIGN KEY ("author_user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 ALTER TABLE "data_events" ADD CONSTRAINT "data_events_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE cascade ON UPDATE no action;
---> statement-breakpoint
-ALTER TABLE "workspace_members" ADD CONSTRAINT "workspace_members_invited_by_users_id_fk" FOREIGN KEY ("invited_by") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
