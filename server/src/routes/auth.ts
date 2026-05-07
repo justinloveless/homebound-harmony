@@ -7,6 +7,7 @@ import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/t
 import { createSession, deleteSession } from '../auth/session';
 import { requireUser } from '../auth/middleware';
 import { isAdminEmail } from '../auth/admin';
+import { isMfaDisabledEmail } from '../auth/mfaBypass';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '../auth/cookie';
 import { logEvent } from '../services/audit';
 import { timingSafeEqual } from 'crypto';
@@ -75,9 +76,11 @@ auth.post('/register', async (c) => {
   let userId: string;
   if (existing.length > 0) {
     // An email already has a row, but the signup may have been abandoned
-    // before the account became usable. MFA-disabled review accounts are
-    // considered finalized even without a TOTP enrollment audit event.
-    const finalized = existing[0].mfaDisabled ? [{ id: existing[0].id }] : await db
+    // before the account became usable. MFA-disabled review accounts (per
+    // column or env allowlist) are considered finalized even without a TOTP
+    // enrollment audit event.
+    const mfaDisabled = existing[0].mfaDisabled || isMfaDisabledEmail(normalizedEmail);
+    const finalized = mfaDisabled ? [{ id: existing[0].id }] : await db
       .select({ id: auditEvents.id })
       .from(auditEvents)
       .where(and(eq(auditEvents.userId, existing[0].id), eq(auditEvents.action, 'totp_enroll')))
@@ -205,7 +208,8 @@ auth.post('/login', async (c) => {
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
-  if (!user.mfaDisabled) {
+  const mfaDisabled = user.mfaDisabled || isMfaDisabledEmail(user.email);
+  if (!mfaDisabled) {
     if (!user.totpSecretEncrypted) {
       return c.json({ error: 'TOTP enrollment incomplete. Please complete registration.' }, 403);
     }
@@ -281,7 +285,7 @@ auth.get('/me', requireUser, async (c) => {
     email: user.email,
     pdkSalt: user.pdkSalt,
     totpEnrolled: !!user.totpSecretEncrypted,
-    mfaDisabled: user.mfaDisabled,
+    mfaDisabled: user.mfaDisabled || isMfaDisabledEmail(user.email),
     isAdmin: isAdminEmail(user.email),
   });
 });

@@ -12,6 +12,7 @@ import { and, asc, desc, eq, gt, ilike, isNull } from 'drizzle-orm';
 import { requireUser, requireAdmin } from '../auth/middleware';
 import { deleteAllSessionsForUser } from '../auth/session';
 import { logEvent } from '../services/audit';
+import { isMfaDisabledEmail } from '../auth/mfaBypass';
 
 const admin = new Hono();
 admin.use('*', requireUser);
@@ -129,7 +130,7 @@ admin.get('/users/:id', async (c) => {
     id: u.id,
     email: u.email,
     createdAt: u.createdAt.toISOString(),
-    mfaDisabled: u.mfaDisabled,
+    mfaDisabled: u.mfaDisabled || isMfaDisabledEmail(u.email),
     memberships: memberships.map((m) => ({
       workspaceId: m.workspaceId,
       role: m.role,
