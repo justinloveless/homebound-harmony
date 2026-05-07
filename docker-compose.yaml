@@ -1,8 +1,9 @@
 # Run the stack — Postgres + API + (optional) dev SPA:
 #
-#   docker compose up --build                  # production-style: postgres + app (API serves the prebuilt SPA on :3000)
-#   docker compose --profile dev up --build    # adds the Vite dev server (`web`) on :5173 for local hacking
-#   docker compose --profile dev up --build web   # dev SPA only; brings in api+postgres via depends_on
+#   docker compose up --build                                      # postgres + app (no host port; use Coolify/proxy or curl via network)
+#   docker compose -f docker-compose.yaml -f docker-compose.local.yaml up --build   # same + http://localhost:3000 on the host
+#   docker compose --profile dev up --build                        # adds Vite `web` on :5173 (see WEB_PORT)
+#   docker compose --profile dev up --build web                    # dev SPA only; brings in api+postgres via depends_on
 #
 # `web` is gated behind the `dev` profile so it never starts on remote hosts
 # like Coolify — `docker compose up` (no profile) brings up only `postgres`
@@ -10,11 +11,14 @@
 # bundled SPA inside `app` is what real users see; `web` is purely a local
 # dev convenience and ships unminified code with a wider attack surface.
 #
-# Defaults are tuned for http://localhost:3000 (production SPA bundled into
-# the API image) and, in dev-profile mode, http://localhost:5173 (Vite dev
-# server in the `web` container with source baked in; override with
-# WEB_PORT). For a real deployment, set NODE_ENV=production behind TLS so
-# __Host-session engages, and replace the example secrets in .env.
+# The `app` service does not publish host ports here so platforms like Coolify
+# can run production + preview stacks without "port already allocated" on :3000.
+# Use docker-compose.local.yaml when you want http://localhost:3000 from Docker.
+#
+# Defaults: production SPA is bundled into the API image (in-container :3000).
+# Dev profile: http://localhost:5173 for the Vite `web` service (override WEB_PORT).
+# For a real deployment, set NODE_ENV=production behind TLS so __Host-session engages,
+# and replace the example secrets in .env.
 
 services:
   postgres:
@@ -56,8 +60,6 @@ services:
       # variable name, producing junk keys like `TOTP_KEK:?TOTP_KEK_is_...`.
       TOTP_KEK: ${TOTP_KEK}
       IP_HASH_PEPPER: ${IP_HASH_PEPPER}
-    ports:
-      - "${APP_PORT:-3000}:3000"
 
   # Vite dev server. Gated behind the `dev` profile so plain `docker compose
   # up` (which is what Coolify runs) never starts it — the bundled SPA inside
