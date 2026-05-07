@@ -19,6 +19,13 @@
 # Dev profile: http://localhost:5173 for the Vite `web` service (override WEB_PORT).
 # For a real deployment, set NODE_ENV=production behind TLS so __Host-session engages,
 # and replace the example secrets in .env.
+#
+# Coolify previews: if the preview URL returns 503 "no available server" while production
+# works, Traefik often has no loadbalancer port for the preview stack (Coolify bug; fixed
+# around v4 beta.455). Upgrade Coolify, and in the UI set the public `app` domain as
+# https://your-host:3000 so the proxy targets container port 3000. As a workaround you can
+# set env PORT=80 in Coolify and use a domain without :3000 so Traefik’s default :80
+# backend matches (requires image user able to bind :80 — root in oven/bun is fine).
 
 services:
   postgres:
@@ -60,6 +67,20 @@ services:
       # variable name, producing junk keys like `TOTP_KEK:?TOTP_KEK_is_...`.
       TOTP_KEK: ${TOTP_KEK}
       IP_HASH_PEPPER: ${IP_HASH_PEPPER}
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "const p = process.env.PORT || '3000'; fetch('http://127.0.0.1:' + p + '/healthz').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1));",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
 
   # Vite dev server. Gated behind the `dev` profile so plain `docker compose
   # up` (which is what Coolify runs) never starts it — the bundled SPA inside
