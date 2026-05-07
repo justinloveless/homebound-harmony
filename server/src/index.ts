@@ -85,8 +85,39 @@ app.get('*', async (c) => {
 
 const port = Number(process.env.PORT ?? 3000);
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientDbError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: string; errno?: number; message?: string };
+  if (e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN') return true;
+  if (e.errno === 103) return true;
+  return typeof e.message === 'string' && /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|Failed to connect/i.test(e.message);
+}
+
+async function runMigrationsWithRetry(): Promise<void> {
+  const attempts = Number(process.env.MIGRATION_RETRIES ?? 20);
+  const delayMs = Number(process.env.MIGRATION_RETRY_DELAY_MS ?? 3000);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await runMigrations();
+      return;
+    } catch (err) {
+      const retryable = isTransientDbError(err);
+      if (!retryable || attempt === attempts) throw err;
+      console.warn(
+        `Migration attempt ${attempt}/${attempts} failed; retrying in ${delayMs}ms`,
+        err,
+      );
+      await sleep(delayMs);
+    }
+  }
+}
+
 if (process.env.RUN_MIGRATIONS_ON_BOOT !== 'false') {
-  await runMigrations().catch((err) => {
+  await runMigrationsWithRetry().catch((err) => {
     console.error('Migration failed:', err);
     process.exit(1);
   });

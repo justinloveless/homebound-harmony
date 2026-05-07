@@ -30,6 +30,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    hostname: postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
@@ -42,6 +43,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      default:
+        aliases:
+          - postgres
 
   app:
     build:
