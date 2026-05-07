@@ -81,13 +81,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const unlock = useCallback(async (password: string) => {
     if (!me) throw new Error('No session to unlock');
+    const meData = await api.get<AuthMe>('/api/auth/me');
+    setMe(meData);
     const blob = await api.get<{ wrappedWorkspaceKey: string; workspaceId?: string }>('/api/snapshot');
     if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
     let wk: CryptoKey;
     try {
       wk = await unwrapWorkspaceKeyFromServerWrap(blob.wrappedWorkspaceKey, {
         password,
-        pdkSalt: me.pdkSalt,
+        pdkSalt: meData.pdkSalt,
       });
     } catch {
       throw new Error('Incorrect password or missing device key');

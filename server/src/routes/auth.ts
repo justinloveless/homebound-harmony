@@ -275,6 +275,7 @@ auth.patch('/me/device-key', requireUser, async (c) => {
 auth.get('/me', requireUser, async (c) => {
   const user = (c as any).get('user') as typeof users.$inferSelect;
   c.header('X-Min-Client-Version', process.env.MIN_CLIENT_VERSION ?? '2026.5.6');
+  c.header('Cache-Control', 'no-store, private');
   return c.json({
     id: user.id,
     email: user.email,

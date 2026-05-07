@@ -12,6 +12,7 @@ import { eventsRouter } from './routes/events';
 import { shareRouter, shareDataHandler } from './routes/share';
 import { adminRouter } from './routes/admin';
 import { workspaceTeamRouter } from './routes/workspaceTeam';
+import { adminAllowlistSize } from './auth/admin';
 import { runMigrations } from './db/migrate';
 import { resolveDatabaseUrl } from './db/connection';
 
@@ -45,12 +46,13 @@ app.use('*', secureHeaders());
 app.get('/healthz', (c) => c.text('ok'));
 
 app.route('/api/auth', authRouter);
+// Team routes must register before the legacy catch-all `workspace.all('*')` 410 router.
+app.route('/api/workspace', workspaceTeamRouter);
 app.route('/api/workspace', workspaceRouter);
 app.route('/api/snapshot', snapshotRouter);
 app.route('/api/events', eventsRouter);
 app.route('/api/share', shareRouter);
 app.route('/api/admin', adminRouter);
-app.route('/api/workspace', workspaceTeamRouter);
 
 // Public share data endpoint — anyone with the URL fragment key can read.
 app.get('/s/:id/data', shareDataHandler);
@@ -180,6 +182,7 @@ if (process.env.RUN_MIGRATIONS_ON_BOOT !== 'false') {
 }
 
 console.log(`Listening on http://0.0.0.0:${port}`);
+console.log(`ADMIN_EMAILS allowlist: ${adminAllowlistSize()} entr(y/ies) (set ADMIN_EMAILS=comma@emails)`);
 
 export default {
   port,

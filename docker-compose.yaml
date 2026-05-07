@@ -56,6 +56,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-app}
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
@@ -73,8 +76,10 @@ services:
       # variable name, producing junk keys like `TOTP_KEK:?TOTP_KEK_is_...`.
       TOTP_KEK: ${TOTP_KEK}
       IP_HASH_PEPPER: ${IP_HASH_PEPPER}
-      # Optional: comma-separated emails that may call `/api/admin/*` (platform operator UI).
-      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      # Optional platform admin allowlist: set `ADMIN_EMAILS` and/or `ADMIN_EMAIL` in `.env` (loaded
+      # via `env_file` above) or in your host's container env (e.g. Coolify). Do not add
+      # `ADMIN_EMAILS: ${ADMIN_EMAILS:-}` here — an empty interpolation overrides `env_file` and
+      # clears the value inside the container.
     expose:
       - "3000"
     healthcheck:
