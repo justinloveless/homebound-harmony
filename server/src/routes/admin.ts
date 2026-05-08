@@ -8,7 +8,7 @@ import {
   dataEvents,
   workspaceMembers,
 } from '../db/schema';
-import { and, asc, count, desc, eq, gt, ilike, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, ilike, isNull, sql } from 'drizzle-orm';
 import { requireUser, requireAdmin } from '../auth/middleware';
 import { deleteAllSessionsForUser } from '../auth/session';
 import { logEvent } from '../services/audit';
@@ -222,6 +222,7 @@ admin.get('/data-events', async (c) => {
 
   const q = db
     .select({
+      id: dataEvents.id,
       workspaceId: dataEvents.workspaceId,
       seq: dataEvents.seq,
       clientEventId: dataEvents.clientEventId,
@@ -257,6 +258,7 @@ admin.get('/data-events', async (c) => {
     limit,
     offset,
     events: rows.map((r) => ({
+      id: r.id,
       workspaceId: r.workspaceId,
       seq: r.seq,
       clientEventId: r.clientEventId,
@@ -267,6 +269,82 @@ admin.get('/data-events', async (c) => {
       authorEmail: r.authorEmail,
       hasGps: r.gpsLat != null && r.gpsLon != null,
     })),
+  });
+});
+
+// GET /api/admin/data-events/:id — metadata + ciphertext/iv (admin-only; decryption uses workspace key only on clients).
+admin.get('/data-events/:id', async (c) => {
+  const operatorId = (c as any).get('userId') as string;
+  const id = c.req.param('id');
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidRe.test(id)) {
+    return c.json({ error: 'Invalid id' }, 400);
+  }
+
+  const rows = await db
+    .select({
+      id: dataEvents.id,
+      workspaceId: dataEvents.workspaceId,
+      seq: dataEvents.seq,
+      clientEventId: dataEvents.clientEventId,
+      prevHash: dataEvents.prevHash,
+      hash: dataEvents.hash,
+      serverReceivedAt: dataEvents.serverReceivedAt,
+      clientClaimedAt: dataEvents.clientClaimedAt,
+      isClinical: dataEvents.isClinical,
+      authorUserId: dataEvents.authorUserId,
+      authorEmail: users.email,
+      gpsLat: dataEvents.gpsLat,
+      gpsLon: dataEvents.gpsLon,
+      gpsAccuracyM: dataEvents.gpsAccuracyM,
+      gpsCapturedAt: dataEvents.gpsCapturedAt,
+      gpsStaleSeconds: dataEvents.gpsStaleSeconds,
+      ipHash: dataEvents.ipHash,
+      ciphertext: dataEvents.ciphertext,
+      iv: dataEvents.iv,
+      ciphertextLen: sql<number>`char_length(${dataEvents.ciphertext})`,
+      ivLen: sql<number>`char_length(${dataEvents.iv})`,
+    })
+    .from(dataEvents)
+    .leftJoin(users, eq(dataEvents.authorUserId, users.id))
+    .where(eq(dataEvents.id, id))
+    .limit(1);
+
+  const r = rows[0];
+  if (!r) return c.json({ error: 'Not found' }, 404);
+
+  await logEvent({
+    action: 'admin_data_event_detail',
+    userId: operatorId,
+    artifactId: id,
+    ip: getClientIp(c),
+    userAgent: getUa(c),
+  });
+
+  return c.json({
+    event: {
+      id: r.id,
+      workspaceId: r.workspaceId,
+      seq: r.seq,
+      clientEventId: r.clientEventId,
+      prevHash: r.prevHash,
+      hash: r.hash,
+      serverReceivedAt: r.serverReceivedAt.toISOString(),
+      clientClaimedAt: r.clientClaimedAt.toISOString(),
+      isClinical: r.isClinical,
+      authorUserId: r.authorUserId,
+      authorEmail: r.authorEmail,
+      gpsLat: r.gpsLat,
+      gpsLon: r.gpsLon,
+      gpsAccuracyM: r.gpsAccuracyM,
+      gpsCapturedAt: r.gpsCapturedAt?.toISOString() ?? null,
+      gpsStaleSeconds: r.gpsStaleSeconds,
+      hasIpHash: !!r.ipHash,
+      ciphertextCharLength: Number(r.ciphertextLen),
+      ivCharLength: Number(r.ivLen),
+      ciphertext: r.ciphertext,
+      iv: r.iv,
+    },
   });
 });
 

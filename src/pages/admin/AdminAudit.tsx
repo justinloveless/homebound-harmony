@@ -1,10 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '@/lib/api';
+import { api, getActiveWorkspaceId } from '@/lib/api';
+import { decryptJson } from '@/lib/crypto';
+import type { Event } from '@/types/events';
+import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { AdminGate } from '@/components/AdminGate';
 import { toast } from 'sonner';
 
@@ -19,7 +29,32 @@ interface AuditRow {
   hasIpHash: boolean;
 }
 
+interface DataEventDetail {
+  id: string;
+  workspaceId: string;
+  seq: number;
+  clientEventId: string;
+  prevHash: string;
+  hash: string;
+  serverReceivedAt: string;
+  clientClaimedAt: string;
+  isClinical: boolean;
+  authorUserId: string;
+  authorEmail: string | null;
+  gpsLat: number | null;
+  gpsLon: number | null;
+  gpsAccuracyM: number | null;
+  gpsCapturedAt: string | null;
+  gpsStaleSeconds: number | null;
+  hasIpHash: boolean;
+  ciphertextCharLength: number;
+  ivCharLength: number;
+  ciphertext: string;
+  iv: string;
+}
+
 interface DataEventRow {
+  id: string;
   workspaceId: string;
   seq: number;
   clientEventId: string;
@@ -33,7 +68,15 @@ interface DataEventRow {
 
 const PAGE_OPTIONS = [25, 50, 100, 200] as const;
 
+type PayloadDecode =
+  | { state: 'idle' }
+  | { state: 'wrong_workspace'; eventWs: string; activeWs: string | null }
+  | { state: 'decrypting' }
+  | { state: 'ok'; payload: Event }
+  | { state: 'fail'; message: string };
+
 export default function AdminAuditPage() {
+  const auth = useAuth();
   const [userId, setUserId] = useState('');
   const [auditLimit, setAuditLimit] = useState<number>(100);
   const [auditOffset, setAuditOffset] = useState(0);
@@ -48,6 +91,10 @@ export default function AdminAuditPage() {
   const [deRows, setDeRows] = useState<DataEventRow[]>([]);
   const [deTotal, setDeTotal] = useState(0);
   const [deLoading, setDeLoading] = useState(true);
+  const [deDetailOpen, setDeDetailOpen] = useState(false);
+  const [deDetail, setDeDetail] = useState<DataEventDetail | null>(null);
+  const [deDetailLoading, setDeDetailLoading] = useState(false);
+  const [payloadDecode, setPayloadDecode] = useState<PayloadDecode>({ state: 'idle' });
 
   const loadAudit = useCallback(async (offset: number, limit: number) => {
     setAuditLoading(true);
@@ -96,6 +143,61 @@ export default function AdminAuditPage() {
       setDeLoading(false);
     }
   }, [authorFilter, wsFilter]);
+
+  const openDataEventDetail = async (id: string) => {
+    setDeDetailOpen(true);
+    setDeDetailLoading(true);
+    setDeDetail(null);
+    setPayloadDecode({ state: 'idle' });
+    try {
+      const res = await api.get<{ event: DataEventDetail }>(`/api/admin/data-events/${id}`);
+      setDeDetail(res.event);
+    } catch {
+      toast.error('Failed to load event detail');
+      setDeDetailOpen(false);
+    } finally {
+      setDeDetailLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!deDetail?.ciphertext || !deDetail?.iv) {
+      setPayloadDecode({ state: 'idle' });
+      return;
+    }
+    const activeWs = getActiveWorkspaceId();
+    if (deDetail.workspaceId !== activeWs) {
+      setPayloadDecode({ state: 'wrong_workspace', eventWs: deDetail.workspaceId, activeWs });
+      return;
+    }
+    const wk = auth.workspaceKey;
+    if (!wk) {
+      setPayloadDecode({
+        state: 'fail',
+        message: 'No workspace key in memory. Unlock with your password from the unlock screen.',
+      });
+      return;
+    }
+    setPayloadDecode({ state: 'decrypting' });
+    let cancelled = false;
+    void decryptJson<Event>({ ciphertext: deDetail.ciphertext, iv: deDetail.iv }, wk).then(
+      (payload) => {
+        if (!cancelled) setPayloadDecode({ state: 'ok', payload });
+      },
+      () => {
+        if (!cancelled) {
+          setPayloadDecode({
+            state: 'fail',
+            message:
+              'Decryption failed. The event might use an older workspace key (after rotation), your session targets another workspace key wrap, or the ciphertext is corrupted.',
+          });
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.workspaceKey, deDetail]);
 
   useEffect(() => {
     void loadAudit(0, 100);
@@ -240,7 +342,8 @@ export default function AdminAuditPage() {
               <CardHeader>
                 <CardTitle>Workspace sync events</CardTitle>
                 <p className="text-sm text-muted-foreground font-normal">
-                  Encrypted clinical/workspace events (metadata only — no payloads). Timeline across all workspaces.
+                  Encrypted workspace events across all workspaces. Summary in the table; Details includes chain hashes, GPS, ciphertext
+                  sizes, and (when your unlocked workspace AES key matches) a JSON payload decrypted in this browser only.
                 </p>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
@@ -328,11 +431,12 @@ export default function AdminAuditPage() {
                     <th className="text-left p-2">Author</th>
                     <th className="text-left p-2">GPS</th>
                     <th className="text-left p-2 font-mono text-xs">Client event id</th>
+                    <th className="text-right p-2 whitespace-nowrap"> </th>
                   </tr>
                 </thead>
                 <tbody>
                   {deRows.map(e => (
-                    <tr key={`${e.workspaceId}-${e.seq}`} className="border-b">
+                    <tr key={e.id} className="border-b">
                       <td className="p-2 whitespace-nowrap">{e.serverReceivedAt}</td>
                       <td className="p-2 font-mono text-xs break-all">{e.workspaceId}</td>
                       <td className="p-2">{e.seq}</td>
@@ -340,11 +444,165 @@ export default function AdminAuditPage() {
                       <td className="p-2">{e.authorEmail ?? e.authorUserId}</td>
                       <td className="p-2">{e.hasGps ? 'yes' : '—'}</td>
                       <td className="p-2 font-mono text-xs break-all">{e.clientEventId}</td>
+                      <td className="p-2 text-right whitespace-nowrap">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2"
+                          onClick={() => void openDataEventDetail(e.id)}
+                        >
+                          Details
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            <Dialog open={deDetailOpen} onOpenChange={(open) => {
+              setDeDetailOpen(open);
+              if (!open) {
+                setDeDetail(null);
+                setDeDetailLoading(false);
+              }
+            }}>
+              <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Workspace event detail</DialogTitle>
+                  <DialogDescription>
+                    Metadata from the database. ciphertext and iv are included for admins; decryption happens only here in the browser
+                    using your unlocked workspace key when the event&apos;s workspace matches your session.
+                  </DialogDescription>
+                </DialogHeader>
+                {deDetailLoading ? (
+                  <p className="text-sm text-muted-foreground py-6">Loading…</p>
+                ) : deDetail ? (
+                  <div className="space-y-4 text-sm">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <p className="text-xs text-muted-foreground">Row id</p>
+                        <p className="font-mono text-xs break-all">{deDetail.id}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Sequence</p>
+                        <p className="font-mono">{deDetail.seq}</p>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="text-xs text-muted-foreground">Workspace</p>
+                        <p className="font-mono text-xs break-all">{deDetail.workspaceId}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Clinical flag</p>
+                        <p>{deDetail.isClinical ? 'yes' : 'no'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Author</p>
+                        <p>{deDetail.authorEmail ?? deDetail.authorUserId}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Client claimed at</p>
+                        <p className="font-mono text-xs">{deDetail.clientClaimedAt}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Server received at</p>
+                        <p className="font-mono text-xs">{deDetail.serverReceivedAt}</p>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <p className="text-xs text-muted-foreground">Client event id</p>
+                        <p className="font-mono text-xs break-all">{deDetail.clientEventId}</p>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Integrity chain</p>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Previous hash</p>
+                        <p className="font-mono text-xs break-all leading-relaxed">{deDetail.prevHash || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground">Event hash</p>
+                        <p className="font-mono text-xs break-all leading-relaxed">{deDetail.hash}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs pt-1">
+                        <span>
+                          IP hash captured:{' '}
+                          <span className="text-foreground">{deDetail.hasIpHash ? 'yes' : 'no'}</span>
+                        </span>
+                        <span>
+                          Ciphertext length (chars):{' '}
+                          <span className="font-mono text-foreground">{deDetail.ciphertextCharLength}</span>
+                        </span>
+                        <span>
+                          IV length (chars): <span className="font-mono text-foreground">{deDetail.ivCharLength}</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="border-t pt-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">GPS (when supplied)</p>
+                      {deDetail.gpsLat != null && deDetail.gpsLon != null ? (
+                        <div className="grid gap-2 sm:grid-cols-2 text-xs font-mono">
+                          <span>Latitude: {deDetail.gpsLat}</span>
+                          <span>Longitude: {deDetail.gpsLon}</span>
+                          {deDetail.gpsAccuracyM != null && <span>Accuracy (m): {deDetail.gpsAccuracyM}</span>}
+                          <span>Captured at: {deDetail.gpsCapturedAt ?? '—'}</span>
+                          {deDetail.gpsStaleSeconds != null && (
+                            <span>Stale (seconds): {deDetail.gpsStaleSeconds}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground text-xs">None stored for this event.</p>
+                      )}
+                    </div>
+
+                    <div className="border-t pt-3 space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Decrypted payload (this browser)</p>
+                      <p className="text-xs text-muted-foreground">
+                        Uses the same AES-256-GCM workspace key as RouteCare sync (&quot;/api/events&quot;). Your session remembers one
+                        workspace id after unlock when the snapshot response includes it; decryption succeeds only when that id equals
+                        the event workspace. The server never sees plaintext events.
+                      </p>
+                      {payloadDecode.state === 'idle' && (
+                        <p className="text-xs text-muted-foreground">Waiting for event blob…</p>
+                      )}
+                      {payloadDecode.state === 'decrypting' && (
+                        <p className="text-xs text-muted-foreground">Decrypting…</p>
+                      )}
+                      {payloadDecode.state === 'wrong_workspace' && (
+                        <div className="text-xs space-y-1 rounded-md bg-muted/50 p-3">
+                          <p className="font-medium text-foreground">Workspace mismatch — cannot decrypt with the current key</p>
+                          <p>
+                            <span className="text-muted-foreground">Event workspace: </span>
+                            <span className="font-mono break-all">{payloadDecode.eventWs}</span>
+                          </p>
+                          <p>
+                            <span className="text-muted-foreground">Unlocked workspace: </span>
+                            <span className="font-mono break-all">
+                              {payloadDecode.activeWs ?? 'unknown — unlock again after resolving your membership workspace'}
+                            </span>
+                          </p>
+                          <p className="text-muted-foreground pt-1">
+                            You need the workspace key wrap for this UUID (membership plus unlock). If you administer another
+                            tenant&apos;s data, log in as a user who belongs to that workspace, or expose a workspace switcher that sets
+                            <code className="mx-1 rounded bg-muted px-1 py-px text-[11px]">X-Workspace-Id</code> before unlock.
+                          </p>
+                        </div>
+                      )}
+                      {payloadDecode.state === 'fail' && (
+                        <p className="text-xs text-destructive">{payloadDecode.message}</p>
+                      )}
+                      {payloadDecode.state === 'ok' && (
+                        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-3 py-2 font-mono text-[11px] leading-relaxed">
+                          {JSON.stringify(payloadDecode.payload, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </DialogContent>
+            </Dialog>
           </TabsContent>
         </Tabs>
       </div>
