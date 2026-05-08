@@ -8,7 +8,7 @@ import {
   dataEvents,
   workspaceMembers,
 } from '../db/schema';
-import { and, asc, desc, eq, gt, ilike, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, ilike, isNull } from 'drizzle-orm';
 import { requireUser, requireAdmin } from '../auth/middleware';
 import { deleteAllSessionsForUser } from '../auth/session';
 import { logEvent } from '../services/audit';
@@ -147,6 +147,13 @@ admin.get('/audit', async (c) => {
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '50')));
   const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
 
+  const auditFilter = filterUserId ? eq(auditEvents.userId, filterUserId) : undefined;
+
+  const [countRow] = auditFilter
+    ? await db.select({ total: count() }).from(auditEvents).where(auditFilter)
+    : await db.select({ total: count() }).from(auditEvents);
+  const total = Number(countRow?.total ?? 0);
+
   const base = db
     .select({
       id: auditEvents.id,
@@ -161,9 +168,9 @@ admin.get('/audit', async (c) => {
     .from(auditEvents)
     .leftJoin(users, eq(auditEvents.userId, users.id));
 
-  const rows = filterUserId
+  const rows = auditFilter
     ? await base
-        .where(eq(auditEvents.userId, filterUserId))
+        .where(auditFilter)
         .orderBy(desc(auditEvents.occurredAt))
         .limit(limit)
         .offset(offset)
@@ -177,6 +184,9 @@ admin.get('/audit', async (c) => {
   });
 
   return c.json({
+    total,
+    limit,
+    offset,
     events: rows.map((r) => ({
       id: r.id,
       action: r.action,
@@ -186,6 +196,76 @@ admin.get('/audit', async (c) => {
       artifactId: r.artifactId,
       userAgent: r.userAgent,
       hasIpHash: !!r.ipHash,
+    })),
+  });
+});
+
+// GET /api/admin/data-events?workspaceId=&authorUserId=&limit=&offset=
+// Metadata only (no ciphertext) — cross-workspace event timeline for admins.
+admin.get('/data-events', async (c) => {
+  const operatorId = (c as any).get('userId') as string;
+  const workspaceId = c.req.query('workspaceId')?.trim();
+  const authorUserId = c.req.query('authorUserId')?.trim();
+  const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '50')));
+  const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
+
+  const predicates = [];
+  if (workspaceId) predicates.push(eq(dataEvents.workspaceId, workspaceId));
+  if (authorUserId) predicates.push(eq(dataEvents.authorUserId, authorUserId));
+  const combined = predicates.length ? and(...predicates) : undefined;
+
+  const countBase = db.select({ total: count() }).from(dataEvents);
+  const [countRow] = combined
+    ? await countBase.where(combined)
+    : await countBase;
+  const total = Number(countRow?.total ?? 0);
+
+  const q = db
+    .select({
+      workspaceId: dataEvents.workspaceId,
+      seq: dataEvents.seq,
+      clientEventId: dataEvents.clientEventId,
+      serverReceivedAt: dataEvents.serverReceivedAt,
+      clientClaimedAt: dataEvents.clientClaimedAt,
+      isClinical: dataEvents.isClinical,
+      authorUserId: dataEvents.authorUserId,
+      authorEmail: users.email,
+      gpsLat: dataEvents.gpsLat,
+      gpsLon: dataEvents.gpsLon,
+    })
+    .from(dataEvents)
+    .leftJoin(users, eq(dataEvents.authorUserId, users.id));
+
+  const rows = combined
+    ? await q
+        .where(combined)
+        .orderBy(desc(dataEvents.serverReceivedAt))
+        .limit(limit)
+        .offset(offset)
+    : await q.orderBy(desc(dataEvents.serverReceivedAt)).limit(limit).offset(offset);
+
+  await logEvent({
+    action: 'admin_data_events_list',
+    userId: operatorId,
+    artifactId: workspaceId ?? authorUserId ?? undefined,
+    ip: getClientIp(c),
+    userAgent: getUa(c),
+  });
+
+  return c.json({
+    total,
+    limit,
+    offset,
+    events: rows.map((r) => ({
+      workspaceId: r.workspaceId,
+      seq: r.seq,
+      clientEventId: r.clientEventId,
+      serverReceivedAt: r.serverReceivedAt.toISOString(),
+      clientClaimedAt: r.clientClaimedAt.toISOString(),
+      isClinical: r.isClinical,
+      authorUserId: r.authorUserId,
+      authorEmail: r.authorEmail,
+      hasGps: r.gpsLat != null && r.gpsLon != null,
     })),
   });
 });

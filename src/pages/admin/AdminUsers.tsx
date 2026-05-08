@@ -45,8 +45,11 @@ export default function AdminUsersPage() {
     <AdminGate>
       <div className="space-y-6 max-w-5xl">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle>Accounts</CardTitle>
+            <Link to="/admin/audit" className="text-sm text-primary hover:underline">
+              Audit trail
+            </Link>
           </CardHeader>
           <CardContent className="flex gap-2">
             <Input placeholder="Search email" value={q} onChange={e => setQ(e.target.value)} />
