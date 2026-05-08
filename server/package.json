@@ -6,14 +6,16 @@
     "start": "bun src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
+    "db:seed": "bun src/scripts/seed.ts",
     "audit:verify": "bun src/scripts/audit-verify.ts"
   },
   "dependencies": {
-    "hono": "^4.6.0",
-    "drizzle-orm": "^0.33.0",
-    "postgres": "^3.4.4",
     "@node-rs/argon2": "^1.7.2",
+    "drizzle-orm": "^0.33.0",
+    "hash-wasm": "^4.12.0",
+    "hono": "^4.6.0",
     "otpauth": "^9.3.4",
+    "postgres": "^3.4.4",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {

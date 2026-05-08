@@ -67,6 +67,7 @@ auth.post('/register', async (c) => {
 
   const passwordHash = await hashPassword(password);
   const normalizedEmail = email.toLowerCase();
+  const registerMfaDisabled = isMfaDisabledEmail(normalizedEmail);
 
   const existing = await db
     .select({ id: users.id, mfaDisabled: users.mfaDisabled })
@@ -93,7 +94,7 @@ auth.post('/register', async (c) => {
       pdkSalt,
       recoveryKeyHash,
       totpSecretEncrypted: null,
-      mfaDisabled: false,
+      mfaDisabled: registerMfaDisabled,
       updatedAt: new Date(),
     }).where(eq(users.id, userId));
     const wsId = userId;
@@ -117,6 +118,7 @@ auth.post('/register', async (c) => {
       passwordHash,
       pdkSalt,
       recoveryKeyHash,
+      mfaDisabled: registerMfaDisabled,
     }).returning({ id: users.id });
     userId = user.id;
     const wsId = userId;
@@ -139,7 +141,7 @@ auth.post('/register', async (c) => {
   }
 
   const registrationToken = createRegToken(userId);
-  return c.json({ registrationToken }, 201);
+  return c.json({ registrationToken, mfaDisabled: registerMfaDisabled }, 201);
 });
 
 // POST /api/auth/totp/enroll
