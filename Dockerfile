@@ -40,5 +40,6 @@ ENV PORT=3000
 ENV PUBLIC_DIR=/app/public
 EXPOSE 3000
 
-# `index.ts` runs migrations against $DATABASE_URL on boot before listening.
+# `index.ts` runs migrations and the review-account seed against $DATABASE_URL on boot, then listens.
+# Set RUN_SEED_ON_BOOT=false to skip seed (e.g. strict production).
 CMD ["bun", "src/index.ts"]

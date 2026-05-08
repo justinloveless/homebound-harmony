@@ -12,7 +12,9 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 export async function verifyPassword(stored: string, password: string): Promise<boolean> {
-  return verify(stored, password);
+  const hashStr = typeof stored === 'string' ? stored.trim() : '';
+  if (!hashStr) return false;
+  return verify(hashStr, password);
 }
 
 // AES-256-GCM encrypt/decrypt for TOTP secrets using server-side KEK.

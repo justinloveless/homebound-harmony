@@ -15,6 +15,7 @@ import { workspaceTeamRouter } from './routes/workspaceTeam';
 import { adminAllowlistSize } from './auth/admin';
 import { runMigrations } from './db/migrate';
 import { resolveDatabaseUrl } from './db/connection';
+import { runSeed } from './scripts/seed';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -179,6 +180,17 @@ if (process.env.RUN_MIGRATIONS_ON_BOOT !== 'false') {
     console.error('Migration failed:', err);
     process.exit(1);
   });
+}
+
+if (process.env.RUN_SEED_ON_BOOT !== 'false') {
+  try {
+    console.log('Running seed…');
+    await runSeed();
+    console.log('Seed complete');
+  } catch (err) {
+    console.error('Seed failed:', err);
+    process.exit(1);
+  }
 }
 
 console.log(`Listening on http://0.0.0.0:${port}`);

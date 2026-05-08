@@ -194,9 +194,9 @@ auth.post('/totp/verify', async (c) => {
 auth.post('/login', async (c) => {
   const body = await c.req.json().catch(() => null);
   const { email, password, code } = body ?? {};
-  if (!email || !password) return c.json({ error: 'Missing fields' }, 400);
-
-  const normalEmail = email.toLowerCase();
+  const passwordStr = typeof password === 'string' ? password.trim() : '';
+  const normalEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!normalEmail || !passwordStr) return c.json({ error: 'Missing fields' }, 400);
 
   if (checkLockout(normalEmail)) {
     return c.json({ error: 'Account locked. Try again in 15 minutes.' }, 429);
@@ -205,20 +205,21 @@ auth.post('/login', async (c) => {
   const rows = await db.select().from(users).where(eq(users.email, normalEmail));
   const user = rows[0];
 
-  if (!user || !(await verifyPassword(user.passwordHash, password))) {
+  if (!user || !(await verifyPassword(user.passwordHash, passwordStr))) {
     recordFail(normalEmail);
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
   const mfaDisabled = user.mfaDisabled || isMfaDisabledEmail(user.email);
+  const totpCode = typeof code === 'string' ? code.trim() : '';
   if (!mfaDisabled) {
     if (!user.totpSecretEncrypted) {
       return c.json({ error: 'TOTP enrollment incomplete. Please complete registration.' }, 403);
     }
-    if (!code) return c.json({ error: 'Missing TOTP code' }, 400);
+    if (!totpCode) return c.json({ error: 'Missing TOTP code' }, 400);
 
     const secret = await decryptTotpSecret(user.totpSecretEncrypted);
-    if (!verifyTotpCode(secret, code)) {
+    if (!verifyTotpCode(secret, totpCode)) {
       recordFail(normalEmail);
       return c.json({ error: 'Invalid TOTP code' }, 401);
     }

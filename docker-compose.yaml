@@ -80,6 +80,7 @@ services:
       # via `env_file` above) or in your host's container env (e.g. Coolify). Do not add
       # `ADMIN_EMAILS: ${ADMIN_EMAILS:-}` here — an empty interpolation overrides `env_file` and
       # clears the value inside the container.
+      # Review-account seed runs on boot by default (`RUN_SEED_ON_BOOT` unset); set to false to skip.
     expose:
       - "3000"
     healthcheck:

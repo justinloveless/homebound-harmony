@@ -7,6 +7,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:seed": "bun src/scripts/seed.ts",
+    "db:verify-seed": "bun src/scripts/verifySeedCredentials.ts",
     "audit:verify": "bun src/scripts/audit-verify.ts"
   },
   "dependencies": {

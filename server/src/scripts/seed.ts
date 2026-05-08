@@ -2,17 +2,21 @@
  * Idempotent dev/review seed: ensures apple.test@gmail.com exists with password Password1234,
  * MFA disabled, and client-compatible wrapped workspace keys.
  *
- * If the user row already exists (e.g. from an older signup), credentials and wraps are reset so the seeded password works.
+ * **Docker / production:** runs automatically after migrations when the API boots (`RUN_SEED_ON_BOOT`
+ * is not `false`). Same Postgres as `DATABASE_URL`.
+ *
+ * **Manual:** `cd server && bun run db:seed`
  *
  * Platform admin UI requires listing this email in ADMIN_EMAILS / ADMIN_EMAIL.
  *
- * Run after migrations: `cd server && bun run db:seed`
+ * For optional host-published Postgres (`docker-compose.local.yaml`), bind defaults to `127.0.0.1:55432`.
  *
  * Recovery key hex (for recovery flow / ops): see SEED_RECOVERY_KEY_HEX in seedCrypto.ts
  */
 import { and, eq } from 'drizzle-orm';
 import { hashPassword } from '../auth/argon';
 import { pg, db } from '../db/client';
+import { resolveDatabaseUrl } from '../db/connection';
 import {
   users,
   workspaces,
@@ -108,7 +112,17 @@ async function upsertSeedWorkspaceRows(params: {
   }
 }
 
-async function main() {
+/** Does not close the shared `pg` pool — safe when called from `index.ts` before serving. */
+export async function runSeed(): Promise<void> {
+  let dbTarget = '(unknown)';
+  try {
+    const u = new URL(resolveDatabaseUrl());
+    dbTarget = `${u.hostname}:${u.port || '5432'}/${u.pathname.replace(/^\//, '')}`;
+  } catch {
+    /* ignore */
+  }
+  console.log(`Seed target DB: ${dbTarget}`);
+
   const normalizedEmail = SEED_EMAIL.toLowerCase();
 
   const passwordHash = await hashPassword(SEED_PASSWORD);
@@ -152,15 +166,22 @@ async function main() {
   const wsId = userId;
   await upsertSeedWorkspaceRows({ userId, wsId, wrappedWorkspaceKey, wrappedWorkspaceKeyRecovery });
 
-  console.log(`Password: ${SEED_PASSWORD} (mfaDisabled=true)`);
+  console.log(`Review account ready: ${normalizedEmail} / ${SEED_PASSWORD} (mfaDisabled=true)`);
   console.log(`Recovery key hex (no spaces): ${SEED_RECOVERY_KEY_HEX}`);
-
-  await pg.end({ timeout: 5 });
-  process.exit(0);
 }
 
-main().catch(async (err) => {
-  console.error(err);
-  await pg.end({ timeout: 5 }).catch(() => {});
-  process.exit(1);
-});
+async function cliMain() {
+  try {
+    await runSeed();
+    await pg.end({ timeout: 5 });
+    process.exit(0);
+  } catch (err) {
+    console.error(err);
+    await pg.end({ timeout: 5 }).catch(() => {});
+    process.exit(1);
+  }
+}
+
+if (import.meta.main) {
+  cliMain();
+}
