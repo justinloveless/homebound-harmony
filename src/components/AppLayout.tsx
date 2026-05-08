@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutGrid, Users, CalendarDays, Settings, Share2, LogOut } from 'lucide-react';
+import { LayoutGrid, Users, CalendarDays, Settings, Share2, LogOut, Shield, UserPlus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -19,18 +19,27 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 
-const navItems = [
+const baseNavItems = [
   { to: '/', label: 'Workspace', icon: LayoutGrid },
   { to: '/clients', label: 'Clients', icon: Users },
   { to: '/schedule', label: 'Schedule', icon: CalendarDays },
   { to: '/share/manage', label: 'Share', icon: Share2 },
+  { to: '/workspace/team', label: 'Team', icon: UserPlus },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 function AppSidebar() {
+  const auth = useAuth();
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
   const location = useLocation();
+
+  const navItems = auth.me?.isAdmin
+    ? [
+        ...baseNavItems,
+        { to: '/admin/users', label: 'Admin', icon: Shield },
+      ]
+    : baseNavItems;
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">

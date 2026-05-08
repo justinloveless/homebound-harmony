@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, bigint, timestamp, integer, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, bigint, timestamp, integer, boolean, doublePrecision, real, uniqueIndex, index, primaryKey } from 'drizzle-orm/pg-core';
 
 const tstz = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -19,22 +19,103 @@ export const userSessions = pgTable('user_sessions', {
   id: text('id').primaryKey(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   expiresAt: tstz('expires_at').notNull(),
-  // Sliding idle deadline; refreshed on every authenticated request.
   idleExpiresAt: tstz('idle_expires_at').notNull(),
   createdAt: tstz('created_at').defaultNow().notNull(),
 });
 
-// ciphertext/iv start empty and are filled on first workspace push.
-// wrappedWorkspaceKey and wrappedWorkspaceKeyRecovery encode iv+ciphertext
-// as base64(iv || aes-gcm-ciphertext), created at registration.
-export const workspaceBlobs = pgTable('workspace_blobs', {
-  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+export const workspaces = pgTable('workspaces', {
+  id: uuid('id').primaryKey(),
+  createdAt: tstz('created_at').defaultNow().notNull(),
+});
+
+export const workspaceMembers = pgTable(
+  'workspace_members',
+  {
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    role: text('role').notNull().default('owner'),
+    invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+    revokedAt: tstz('revoked_at'),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.workspaceId, t.userId] }),
+  }),
+);
+
+export const workspaceKeyWraps = pgTable(
+  'workspace_key_wraps',
+  {
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    keyEpoch: integer('key_epoch').notNull().default(0),
+    wrappedWorkspaceKey: text('wrapped_workspace_key').notNull(),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.workspaceId, t.userId, t.keyEpoch] }),
+  }),
+);
+
+export const workspaceSnapshots = pgTable('workspace_snapshots', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
   ciphertext: text('ciphertext').notNull().default(''),
   iv: text('iv').notNull().default(''),
-  wrappedWorkspaceKey: text('wrapped_workspace_key').notNull(),
   wrappedWorkspaceKeyRecovery: text('wrapped_workspace_key_recovery').notNull(),
+  keyEpoch: integer('key_epoch').notNull().default(0),
   version: bigint('version', { mode: 'number' }).notNull().default(0),
+  snapshotSeq: bigint('snapshot_seq', { mode: 'number' }).notNull().default(0),
   updatedAt: tstz('updated_at').defaultNow().notNull(),
+});
+
+export const dataEvents = pgTable(
+  'data_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .references(() => workspaces.id, { onDelete: 'cascade' })
+      .notNull(),
+    authorUserId: uuid('author_user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    clientEventId: text('client_event_id').notNull(),
+    seq: bigint('seq', { mode: 'number' }).notNull(),
+    prevHash: text('prev_hash').notNull(),
+    hash: text('hash').notNull(),
+    ciphertext: text('ciphertext').notNull(),
+    iv: text('iv').notNull(),
+    clientClaimedAt: tstz('client_claimed_at').notNull(),
+    serverReceivedAt: tstz('server_received_at').defaultNow().notNull(),
+    ipHash: text('ip_hash'),
+    gpsLat: doublePrecision('gps_lat'),
+    gpsLon: doublePrecision('gps_lon'),
+    gpsAccuracyM: real('gps_accuracy_m'),
+    gpsCapturedAt: tstz('gps_captured_at'),
+    gpsStaleSeconds: integer('gps_stale_seconds'),
+    isClinical: boolean('is_clinical').notNull(),
+  },
+  (t) => ({
+    workspaceClientUniq: uniqueIndex('data_events_workspace_client_event_id_unique').on(t.workspaceId, t.clientEventId),
+    workspaceSeqIdx: index('data_events_workspace_id_seq_idx').on(t.workspaceId, t.seq),
+  }),
+);
+
+export const userEventChain = pgTable('user_event_chain', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: 'cascade' }),
+  headSeq: bigint('head_seq', { mode: 'number' }).notNull().default(0),
+  headHash: text('head_hash').notNull().default(''),
 });
 
 export const shareArtifacts = pgTable('share_artifacts', {

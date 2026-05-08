@@ -145,6 +145,11 @@ struct WorkerProfile: Codable {
         var endTime: String
         var label: String
         var id: String { "\(startTime)-\(endTime)-\(label)" }
+
+        /// Omit computed `id` so synthesis matches web JSON (no `id` on breaks).
+        private enum CodingKeys: String, CodingKey {
+            case startTime, endTime, label
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -226,6 +231,11 @@ struct DaySchedule: Codable, Identifiable {
     var totalTravelMinutes: Int
     var leaveHomeTime: String
     var arriveHomeTime: String
+
+    /// Omit computed `id` so JSON matches the web payload (no `id` on day rows).
+    private enum CodingKeys: String, CodingKey {
+        case day, date, visits, totalTravelMinutes, leaveHomeTime, arriveHomeTime
+    }
 }
 
 struct UnmetVisit: Codable {
@@ -324,6 +334,7 @@ struct MeResponse: Decodable {
     let pdkSalt: String
     let totpEnrolled: Bool
     let mfaDisabled: Bool?
+    let isAdmin: Bool?
 }
 
 struct ServerBlob: Decodable {
@@ -332,6 +343,18 @@ struct ServerBlob: Decodable {
     let wrappedWorkspaceKey: String
     let wrappedWorkspaceKeyRecovery: String
     let version: Int
+}
+
+/// GET /api/snapshot — includes `snapshotSeq` for event replay tail.
+struct ServerSnapshot: Decodable {
+    let workspaceId: String?
+    let keyEpoch: Int?
+    let ciphertext: String
+    let iv: String
+    let wrappedWorkspaceKey: String
+    let wrappedWorkspaceKeyRecovery: String
+    let version: Int
+    let snapshotSeq: Int
 }
 
 struct PutWorkspaceRequest: Encodable {

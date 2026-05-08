@@ -1,22 +1,37 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import { DEFAULT_WORKSPACE, type Workspace, frequencyToVisits } from '@/types/models';
 
-// IndexedDB now functions as a local cache only — the encrypted server blob
-// is the source of truth (see src/lib/sync.ts). The legacy File System
-// Access helpers have been removed.
+// IndexedDB: workspace cache + event outbox (see src/lib/outbox.ts, src/lib/sync.ts).
 
 const DB_NAME = 'home-health-scheduler';
+const DB_VERSION = 2;
 const STORE_NAME = 'workspace';
 const WORKSPACE_KEY = 'current';
 
+export const STORES = {
+  workspace: STORE_NAME,
+  outbox: 'events_outbox',
+  meta: 'events_meta',
+} as const;
+
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
-function getDB() {
+/** Shared DB handle for workspace + event outbox. */
+export function getSchedulerDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, 1, {
-      upgrade(db) {
+    dbPromise = openDB(DB_NAME, DB_VERSION, {
+      upgrade(db, oldVersion) {
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME);
+        }
+        if (oldVersion < 2) {
+          if (!db.objectStoreNames.contains(STORES.outbox)) {
+            const ob = db.createObjectStore(STORES.outbox, { keyPath: 'clientEventId' });
+            ob.createIndex('byOrder', 'order');
+          }
+          if (!db.objectStoreNames.contains(STORES.meta)) {
+            db.createObjectStore(STORES.meta);
+          }
         }
       },
     });
@@ -44,13 +59,13 @@ export function migrateWorkspace(ws: Workspace): Workspace {
 }
 
 export async function loadWorkspace(): Promise<Workspace> {
-  const db = await getDB();
+  const db = await getSchedulerDB();
   const data = await db.get(STORE_NAME, WORKSPACE_KEY);
   return migrateWorkspace(data ?? { ...DEFAULT_WORKSPACE });
 }
 
 export async function saveWorkspace(ws: Workspace): Promise<void> {
-  const db = await getDB();
+  const db = await getSchedulerDB();
   await db.put(STORE_NAME, ws, WORKSPACE_KEY);
 }
 

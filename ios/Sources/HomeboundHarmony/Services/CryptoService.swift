@@ -20,6 +20,8 @@ enum CryptoError: LocalizedError {
     case openFailed(Error)
     case decodingFailed(Error)
     case encodingFailed(Error)
+    /// Shared-workspace invite envelope (ECDH JSON) — use the web app for now.
+    case deviceKeyInviteNotSupportedOnIOS
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +32,8 @@ enum CryptoError: LocalizedError {
         case .openFailed(let e):   return "Decryption failed: \(e.localizedDescription)"
         case .decodingFailed(let e): return "JSON decode failed: \(e.localizedDescription)"
         case .encodingFailed(let e): return "JSON encode failed: \(e.localizedDescription)"
+        case .deviceKeyInviteNotSupportedOnIOS:
+            return "This workspace uses a device key invite. Use the RouteCare web app, or sign in with the primary owner account."
         }
     }
 }
@@ -79,6 +83,14 @@ final class CryptoService {
     }
 
     // MARK: - Key wrapping (envelope = base64(iv || AES-GCM(wrappingKey, rawWK)))
+
+    /// Password-wrapped envelope, or fails for ECDH JSON invites (shared members).
+    func unwrapWorkspaceKeyFromServer(envelope: String, wrappingKey: SymmetricKey) throws -> SymmetricKey {
+        if envelope.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
+            throw CryptoError.deviceKeyInviteNotSupportedOnIOS
+        }
+        return try unwrapWorkspaceKey(envelope: envelope, wrappingKey: wrappingKey)
+    }
 
     func unwrapWorkspaceKey(envelope: String, wrappingKey: SymmetricKey) throws -> SymmetricKey {
         guard let combined = Data(base64Encoded: envelope), combined.count > 28 else {
@@ -157,8 +169,12 @@ final class CryptoService {
             throw CryptoError.openFailed(error)
         }
 
+        // Own a contiguous copy before decoding — avoids rare EXC_BAD_ACCESS if `plaintext`
+        // were ever backed by memory that CryptoKit reclaims before JSONDecoder finishes.
+        let jsonData = Data(plaintext)
+
         do {
-            return try JSONDecoder().decode(Workspace.self, from: plaintext)
+            return try JSONDecoder().decode(Workspace.self, from: jsonData)
         } catch {
             throw CryptoError.decodingFailed(error)
         }

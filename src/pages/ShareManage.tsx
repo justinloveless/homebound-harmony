@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { enqueueEvent, drainOutbox } from '@/lib/outbox';
+import type { Event } from '@/types/events';
 import {
   encryptJson,
   exportShareKeyAsHex,
@@ -24,8 +27,30 @@ interface ServerArtifact {
   createdAt: string;
 }
 
+function clinicalGpsFromBrowser(): Promise<{ lat: number; lon: number; accuracyM: number; capturedAt: string } | null> {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        resolve({
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracyM: pos.coords.accuracy,
+          capturedAt: new Date(pos.timestamp).toISOString(),
+        });
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 20_000 },
+    );
+  });
+}
+
 export default function ShareManagePage() {
   const { workspace } = useWorkspace();
+  const { workspaceKey } = useAuth();
   const [artifacts, setArtifacts] = useState<ServerArtifact[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
@@ -72,6 +97,23 @@ export default function ShareManagePage() {
         iv: enc.iv,
         expiresInDays,
       });
+
+      if (workspaceKey) {
+        const gps = await clinicalGpsFromBrowser();
+        if (gps) {
+          const ev: Event = {
+            clientEventId: crypto.randomUUID(),
+            kind: 'share_create',
+            payload: { artifactId: id },
+            claimedAt: new Date().toISOString(),
+            gps,
+          };
+          await enqueueEvent(ev, workspaceKey, gps);
+          await drainOutbox();
+        } else {
+          toast.message('Share link created (audit GPS unavailable)');
+        }
+      }
 
       const url = `${window.location.origin}/s/${id}#${keyHex}`;
       await navigator.clipboard.writeText(url).catch(() => {});

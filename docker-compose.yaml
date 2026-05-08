@@ -30,6 +30,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    hostname: postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
@@ -42,6 +43,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      default:
+        aliases:
+          - postgres
 
   app:
     build:
@@ -51,8 +56,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-app}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       # NODE_ENV=development keeps the cookie name plain `session` so plain
       # HTTP works locally. Switch to `production` (and front this with TLS)
       # for the __Host-session cookie.
@@ -67,6 +76,11 @@ services:
       # variable name, producing junk keys like `TOTP_KEK:?TOTP_KEK_is_...`.
       TOTP_KEK: ${TOTP_KEK}
       IP_HASH_PEPPER: ${IP_HASH_PEPPER}
+      # Optional platform admin allowlist: set `ADMIN_EMAILS` and/or `ADMIN_EMAIL` in `.env` (loaded
+      # via `env_file` above) or in your host's container env (e.g. Coolify). Do not add
+      # `ADMIN_EMAILS: ${ADMIN_EMAILS:-}` here — an empty interpolation overrides `env_file` and
+      # clears the value inside the container.
+      # Review-account seed runs on boot by default (`RUN_SEED_ON_BOOT` unset); set to false to skip.
     expose:
       - "3000"
     healthcheck:

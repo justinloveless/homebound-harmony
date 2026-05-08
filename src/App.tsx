@@ -4,6 +4,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { AppUpdateGate } from "@/components/AppUpdateGate";
 import { AuthGuard, PublicOnly } from "@/components/AuthGuard";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { AppLayout } from "@/components/AppLayout";
@@ -18,6 +19,10 @@ import RecoverPage from "./pages/Recover";
 import UnlockPage from "./pages/Unlock";
 import ShareManagePage from "./pages/ShareManage";
 import SharePublicPage from "./pages/Share";
+import AdminUsersPage from "./pages/admin/AdminUsers";
+import AdminUserDetailPage from "./pages/admin/AdminUserDetail";
+import AdminAuditPage from "./pages/admin/AdminAudit";
+import WorkspaceTeamPage from "./pages/WorkspaceTeam";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +37,10 @@ function ProtectedShell() {
             <Route path="/schedule" element={<Schedule />} />
             <Route path="/share/manage" element={<ShareManagePage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/workspace/team" element={<WorkspaceTeamPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/users/:id" element={<AdminUserDetailPage />} />
+            <Route path="/admin/audit" element={<AdminAuditPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AppLayout>
@@ -47,6 +56,7 @@ const App = () => (
       <Sonner />
       <AuthProvider>
         <BrowserRouter>
+          <AppUpdateGate>
           <Routes>
             <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
             <Route path="/register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
@@ -55,6 +65,7 @@ const App = () => (
             <Route path="/s/:id" element={<SharePublicPage />} />
             <Route path="/*" element={<ProtectedShell />} />
           </Routes>
+          </AppUpdateGate>
         </BrowserRouter>
       </AuthProvider>
     </TooltipProvider>

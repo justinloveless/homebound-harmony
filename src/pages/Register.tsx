@@ -10,9 +10,10 @@ import {
   generatePdkSalt,
   generateRecoveryKey,
   generateWorkspaceKey,
-  unwrapKey,
+  unwrapWorkspaceKeyFromServerWrap,
   wrapKey,
 } from '@/lib/crypto';
+import { setActiveWorkspaceId } from '@/lib/api';
 import type { AuthMe } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,7 @@ interface PendingRegistration {
   password: string;
   registrationToken: string;
   recoveryKey: string;
+  mfaDisabled: boolean;
 }
 
 export default function RegisterPage() {
@@ -49,6 +51,24 @@ export default function RegisterPage() {
   const [totpCode, setTotpCode] = useState('');
   const [totpToken, setTotpToken] = useState<string | null>(null);
 
+  const finalizeRegisteredSession = async (p: PendingRegistration, loginOpts: { code?: string }) => {
+    await api.post<{ pdkSalt: string }>('/api/auth/login', {
+      email: p.email,
+      password: p.password,
+      ...(loginOpts.code ? { code: loginOpts.code } : {}),
+    });
+    const meData = await api.get<AuthMe>('/api/auth/me');
+    const blob = await api.get<{ wrappedWorkspaceKey: string; workspaceId?: string }>('/api/snapshot');
+    if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
+    const wk = await unwrapWorkspaceKeyFromServerWrap(blob.wrappedWorkspaceKey, {
+      password: p.password,
+      pdkSalt: meData.pdkSalt,
+    });
+    auth.setUnlockedSession(meData, wk, blob.workspaceId);
+    setStep('done');
+    navigate('/', { replace: true });
+  };
+
   const submitCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password.length < 8) { toast.error('Password must be at least 8 characters'); return; }
@@ -67,7 +87,10 @@ export default function RegisterPage() {
       const wrappedWorkspaceKeyRecovery = await wrapKey(wk, recoveryWrappingKey);
       const recoveryKeyHash = await deriveRecoveryHash(recoveryKey);
 
-      const { registrationToken } = await api.post<{ registrationToken: string }>('/api/auth/register', {
+      const { registrationToken, mfaDisabled } = await api.post<{
+        registrationToken: string;
+        mfaDisabled?: boolean;
+      }>('/api/auth/register', {
         email: email.trim().toLowerCase(),
         password,
         pdkSalt,
@@ -76,7 +99,13 @@ export default function RegisterPage() {
         wrappedWorkspaceKeyRecovery,
       });
 
-      setPending({ email: email.trim().toLowerCase(), password, registrationToken, recoveryKey });
+      setPending({
+        email: email.trim().toLowerCase(),
+        password,
+        registrationToken,
+        recoveryKey,
+        mfaDisabled: !!mfaDisabled,
+      });
       setStep('recovery');
     } catch (err: any) {
       toast.error(err?.message ?? 'Registration failed');
@@ -104,6 +133,22 @@ export default function RegisterPage() {
     }
   };
 
+  const continueAfterRecovery = async () => {
+    if (!pending || !savedAck) return;
+    if (pending.mfaDisabled) {
+      setSubmitting(true);
+      try {
+        await finalizeRegisteredSession(pending, {});
+      } catch (err: any) {
+        toast.error(err?.message ?? 'Sign-in failed');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+    await continueToTotp();
+  };
+
   const verifyTotp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!pending || !totpToken) return;
@@ -114,19 +159,7 @@ export default function RegisterPage() {
         code: totpCode.trim(),
       });
 
-      // Auto-login with the same credentials and the (still valid) TOTP code.
-      const { pdkSalt } = await api.post<{ pdkSalt: string }>('/api/auth/login', {
-        email: pending.email,
-        password: pending.password,
-        code: totpCode.trim(),
-      });
-      const meData = await api.get<AuthMe>('/api/auth/me');
-      const blob = await api.get<{ wrappedWorkspaceKey: string }>('/api/workspace');
-      const pdk = await derivePdk(pending.password, pdkSalt);
-      const wk = await unwrapKey(blob.wrappedWorkspaceKey, pdk);
-      auth.setUnlockedSession(meData, wk);
-      setStep('done');
-      navigate('/', { replace: true });
+      await finalizeRegisteredSession(pending, { code: totpCode.trim() });
     } catch (err: any) {
       toast.error(err?.message ?? 'Verification failed');
     } finally {
@@ -184,6 +217,11 @@ export default function RegisterPage() {
                 Your <strong>recovery key</strong> is the only way to regain access if you forget your password.
                 Save it offline somewhere safe (password manager, paper) — we will <strong>never</strong> see it again.
               </p>
+              {pending.mfaDisabled && (
+                <p className="text-sm text-muted-foreground">
+                  Your account does not require an authenticator app — after this step you will be signed in directly.
+                </p>
+              )}
               <div className="rounded-md border bg-muted/40 p-3 font-mono text-sm break-all leading-relaxed">
                 {formatRecoveryKey(pending.recoveryKey)}
               </div>
@@ -194,8 +232,8 @@ export default function RegisterPage() {
                 <Checkbox checked={savedAck} onCheckedChange={(v) => setSavedAck(!!v)} className="mt-0.5" />
                 <span>I have saved my recovery key. I understand losing it along with my password means losing all my data.</span>
               </label>
-              <Button className="w-full" onClick={continueToTotp} disabled={!savedAck || submitting}>
-                {submitting ? 'Working…' : 'Continue'}
+              <Button className="w-full" onClick={continueAfterRecovery} disabled={!savedAck || submitting}>
+                {submitting ? 'Working…' : pending.mfaDisabled ? 'Finish' : 'Continue'}
               </Button>
             </div>
           )}

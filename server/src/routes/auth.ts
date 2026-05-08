@@ -1,15 +1,18 @@
 import { Hono } from 'hono';
 import { getCookie } from 'hono/cookie';
 import { db } from '../db/client';
-import { users, workspaceBlobs, auditEvents } from '../db/schema';
-import { and, eq } from 'drizzle-orm';
+import { users, workspaces, workspaceMembers, workspaceKeyWraps, workspaceSnapshots, userEventChain, auditEvents } from '../db/schema';
 import { hashPassword, verifyPassword, encryptTotpSecret, decryptTotpSecret } from '../auth/argon';
 import { generateTotpSecret, verifyTotpCode, generateQrDataUrl } from '../auth/totp';
 import { createSession, deleteSession } from '../auth/session';
 import { requireUser } from '../auth/middleware';
+import { isAdminEmail } from '../auth/admin';
+import { isMfaDisabledEmail } from '../auth/mfaBypass';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '../auth/cookie';
 import { logEvent } from '../services/audit';
 import { timingSafeEqual } from 'crypto';
+import { and, eq, isNull } from 'drizzle-orm';
+import { listActiveWorkspaceIdsForUser } from '../services/workspaceContext';
 
 const auth = new Hono();
 
@@ -64,6 +67,7 @@ auth.post('/register', async (c) => {
 
   const passwordHash = await hashPassword(password);
   const normalizedEmail = email.toLowerCase();
+  const registerMfaDisabled = isMfaDisabledEmail(normalizedEmail);
 
   const existing = await db
     .select({ id: users.id, mfaDisabled: users.mfaDisabled })
@@ -73,9 +77,11 @@ auth.post('/register', async (c) => {
   let userId: string;
   if (existing.length > 0) {
     // An email already has a row, but the signup may have been abandoned
-    // before the account became usable. MFA-disabled review accounts are
-    // considered finalized even without a TOTP enrollment audit event.
-    const finalized = existing[0].mfaDisabled ? [{ id: existing[0].id }] : await db
+    // before the account became usable. MFA-disabled review accounts (per
+    // column or env allowlist) are considered finalized even without a TOTP
+    // enrollment audit event.
+    const mfaDisabled = existing[0].mfaDisabled || isMfaDisabledEmail(normalizedEmail);
+    const finalized = mfaDisabled ? [{ id: existing[0].id }] : await db
       .select({ id: auditEvents.id })
       .from(auditEvents)
       .where(and(eq(auditEvents.userId, existing[0].id), eq(auditEvents.action, 'totp_enroll')))
@@ -88,32 +94,54 @@ auth.post('/register', async (c) => {
       pdkSalt,
       recoveryKeyHash,
       totpSecretEncrypted: null,
-      mfaDisabled: false,
+      mfaDisabled: registerMfaDisabled,
       updatedAt: new Date(),
     }).where(eq(users.id, userId));
-    await db.update(workspaceBlobs).set({
-      wrappedWorkspaceKey,
+    const wsId = userId;
+    await db.update(workspaceSnapshots).set({
       wrappedWorkspaceKeyRecovery,
       updatedAt: new Date(),
-    }).where(eq(workspaceBlobs.userId, userId));
+    }).where(eq(workspaceSnapshots.workspaceId, wsId));
+    await db
+      .update(workspaceKeyWraps)
+      .set({ wrappedWorkspaceKey, createdAt: new Date() })
+      .where(
+        and(
+          eq(workspaceKeyWraps.workspaceId, wsId),
+          eq(workspaceKeyWraps.userId, userId),
+          eq(workspaceKeyWraps.keyEpoch, 0),
+        ),
+      );
   } else {
     const [user] = await db.insert(users).values({
       email: normalizedEmail,
       passwordHash,
       pdkSalt,
       recoveryKeyHash,
+      mfaDisabled: registerMfaDisabled,
     }).returning({ id: users.id });
     userId = user.id;
+    const wsId = userId;
 
-    await db.insert(workspaceBlobs).values({
+    await db.insert(workspaces).values({ id: wsId });
+    await db.insert(workspaceMembers).values({ workspaceId: wsId, userId, role: 'owner' });
+    await db.insert(workspaceKeyWraps).values({
+      workspaceId: wsId,
       userId,
+      keyEpoch: 0,
       wrappedWorkspaceKey,
-      wrappedWorkspaceKeyRecovery,
     });
+    await db.insert(workspaceSnapshots).values({
+      workspaceId: wsId,
+      wrappedWorkspaceKeyRecovery,
+      ciphertext: '',
+      iv: '',
+    });
+    await db.insert(userEventChain).values({ workspaceId: wsId, headSeq: 0, headHash: '' });
   }
 
   const registrationToken = createRegToken(userId);
-  return c.json({ registrationToken }, 201);
+  return c.json({ registrationToken, mfaDisabled: registerMfaDisabled }, 201);
 });
 
 // POST /api/auth/totp/enroll
@@ -166,9 +194,9 @@ auth.post('/totp/verify', async (c) => {
 auth.post('/login', async (c) => {
   const body = await c.req.json().catch(() => null);
   const { email, password, code } = body ?? {};
-  if (!email || !password) return c.json({ error: 'Missing fields' }, 400);
-
-  const normalEmail = email.toLowerCase();
+  const passwordStr = typeof password === 'string' ? password.trim() : '';
+  const normalEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!normalEmail || !passwordStr) return c.json({ error: 'Missing fields' }, 400);
 
   if (checkLockout(normalEmail)) {
     return c.json({ error: 'Account locked. Try again in 15 minutes.' }, 429);
@@ -177,19 +205,21 @@ auth.post('/login', async (c) => {
   const rows = await db.select().from(users).where(eq(users.email, normalEmail));
   const user = rows[0];
 
-  if (!user || !(await verifyPassword(user.passwordHash, password))) {
+  if (!user || !(await verifyPassword(user.passwordHash, passwordStr))) {
     recordFail(normalEmail);
     return c.json({ error: 'Invalid credentials' }, 401);
   }
 
-  if (!user.mfaDisabled) {
+  const mfaDisabled = user.mfaDisabled || isMfaDisabledEmail(user.email);
+  const totpCode = typeof code === 'string' ? code.trim() : '';
+  if (!mfaDisabled) {
     if (!user.totpSecretEncrypted) {
       return c.json({ error: 'TOTP enrollment incomplete. Please complete registration.' }, 403);
     }
-    if (!code) return c.json({ error: 'Missing TOTP code' }, 400);
+    if (!totpCode) return c.json({ error: 'Missing TOTP code' }, 400);
 
     const secret = await decryptTotpSecret(user.totpSecretEncrypted);
-    if (!verifyTotpCode(secret, code)) {
+    if (!verifyTotpCode(secret, totpCode)) {
       recordFail(normalEmail);
       return c.json({ error: 'Invalid TOTP code' }, 401);
     }
@@ -213,15 +243,53 @@ auth.post('/logout', requireUser, async (c) => {
   return c.json({ success: true });
 });
 
+// GET /api/auth/lookup-user?email=  (for workspace invites)
+auth.get('/lookup-user', requireUser, async (c) => {
+  const email = c.req.query('email')?.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return c.json({ error: 'Invalid email' }, 400);
+  }
+  const rows = await db
+    .select({ id: users.id, email: users.email, masterPublicKey: users.masterPublicKey })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+  const u = rows[0];
+  if (!u) return c.json({ error: 'User not found' }, 404);
+  return c.json({
+    id: u.id,
+    email: u.email,
+    masterPublicKey: u.masterPublicKey,
+  });
+});
+
+// PATCH /api/auth/me/device-key  { masterPublicKey }
+auth.patch('/me/device-key', requireUser, async (c) => {
+  const user = (c as any).get('user') as typeof users.$inferSelect;
+  const body = await c.req.json().catch(() => null);
+  const masterPublicKey = body?.masterPublicKey;
+  if (typeof masterPublicKey !== 'string' || !masterPublicKey.trim()) {
+    return c.json({ error: 'Missing masterPublicKey' }, 400);
+  }
+  await db
+    .update(users)
+    .set({ masterPublicKey: masterPublicKey.trim(), updatedAt: new Date() })
+    .where(eq(users.id, user.id));
+  return c.json({ success: true });
+});
+
 // GET /api/auth/me
 auth.get('/me', requireUser, async (c) => {
   const user = (c as any).get('user') as typeof users.$inferSelect;
+  c.header('X-Min-Client-Version', process.env.MIN_CLIENT_VERSION ?? '2026.5.6');
+  c.header('Cache-Control', 'no-store, private');
   return c.json({
     id: user.id,
     email: user.email,
     pdkSalt: user.pdkSalt,
     totpEnrolled: !!user.totpSecretEncrypted,
-    mfaDisabled: user.mfaDisabled,
+    mfaDisabled: user.mfaDisabled || isMfaDisabledEmail(user.email),
+    isAdmin: isAdminEmail(user.email),
   });
 });
 
@@ -229,7 +297,14 @@ auth.get('/me', requireUser, async (c) => {
 auth.post('/password/change', requireUser, async (c) => {
   const user = (c as any).get('user') as typeof users.$inferSelect;
   const body = await c.req.json().catch(() => null);
-  const { currentPassword, newPassword, newPdkSalt, newWrappedWorkspaceKey, newWrappedWorkspaceKeyRecovery } = body ?? {};
+  const {
+    currentPassword,
+    newPassword,
+    newPdkSalt,
+    newWrappedWorkspaceKey,
+    newWrappedWorkspaceKeyRecovery,
+    workspaceId: bodyWorkspaceId,
+  } = body ?? {};
 
   if (!currentPassword || !newPassword || !newPdkSalt || !newWrappedWorkspaceKey || !newWrappedWorkspaceKeyRecovery) {
     return c.json({ error: 'Missing fields' }, 400);
@@ -240,11 +315,48 @@ auth.post('/password/change', requireUser, async (c) => {
     return c.json({ error: 'Invalid current password' }, 401);
   }
 
+  let workspaceId = typeof bodyWorkspaceId === 'string' ? bodyWorkspaceId : undefined;
+  if (!workspaceId) {
+    const ids = await listActiveWorkspaceIdsForUser(user.id);
+    if (ids.length !== 1) {
+      return c.json({ error: 'Pass workspaceId when you belong to multiple workspaces' }, 400);
+    }
+    workspaceId = ids[0];
+  } else {
+    const m = await db
+      .select()
+      .from(workspaceMembers)
+      .where(
+        and(
+          eq(workspaceMembers.workspaceId, workspaceId),
+          eq(workspaceMembers.userId, user.id),
+          isNull(workspaceMembers.revokedAt),
+        ),
+      )
+      .limit(1);
+    if (!m[0]) return c.json({ error: 'Not a member of this workspace' }, 403);
+  }
+
+  const snaps = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.workspaceId, workspaceId)).limit(1);
+  const snap = snaps[0];
+  if (!snap) return c.json({ error: 'Workspace not found' }, 404);
+
   const newHash = await hashPassword(newPassword);
   await db.update(users).set({ passwordHash: newHash, pdkSalt: newPdkSalt, updatedAt: new Date() }).where(eq(users.id, user.id));
-  await db.update(workspaceBlobs)
-    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, wrappedWorkspaceKeyRecovery: newWrappedWorkspaceKeyRecovery, updatedAt: new Date() })
-    .where(eq(workspaceBlobs.userId, user.id));
+  await db
+    .update(workspaceKeyWraps)
+    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, createdAt: new Date() })
+    .where(
+      and(
+        eq(workspaceKeyWraps.workspaceId, workspaceId),
+        eq(workspaceKeyWraps.userId, user.id),
+        eq(workspaceKeyWraps.keyEpoch, snap.keyEpoch),
+      ),
+    );
+  await db
+    .update(workspaceSnapshots)
+    .set({ wrappedWorkspaceKeyRecovery: newWrappedWorkspaceKeyRecovery, updatedAt: new Date() })
+    .where(eq(workspaceSnapshots.workspaceId, workspaceId));
 
   await logEvent({ action: 'password_change', userId: user.id, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ success: true });
@@ -269,7 +381,7 @@ auth.post('/recovery/init', async (c) => {
     return c.json({ error: 'Invalid recovery info' }, 401);
   }
 
-  const blobs = await db.select().from(workspaceBlobs).where(eq(workspaceBlobs.userId, user.id));
+  const blobs = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.workspaceId, user.id));
   const blob = blobs[0];
   if (!blob) return c.json({ error: 'Workspace missing' }, 500);
 
@@ -304,9 +416,20 @@ auth.post('/recovery', async (c) => {
   await db.update(users)
     .set({ passwordHash: newHash, pdkSalt: newPdkSalt, updatedAt: new Date() })
     .where(eq(users.id, user.id));
-  await db.update(workspaceBlobs)
-    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, updatedAt: new Date() })
-    .where(eq(workspaceBlobs.userId, user.id));
+  const snaps = await db.select().from(workspaceSnapshots).where(eq(workspaceSnapshots.workspaceId, user.id)).limit(1);
+  const snap = snaps[0];
+  if (!snap) return c.json({ error: 'Workspace missing' }, 500);
+
+  await db
+    .update(workspaceKeyWraps)
+    .set({ wrappedWorkspaceKey: newWrappedWorkspaceKey, createdAt: new Date() })
+    .where(
+      and(
+        eq(workspaceKeyWraps.workspaceId, user.id),
+        eq(workspaceKeyWraps.userId, user.id),
+        eq(workspaceKeyWraps.keyEpoch, snap.keyEpoch),
+      ),
+    );
 
   await logEvent({ action: 'recovery_used', userId: user.id, ip: getClientIp(c), userAgent: c.req.header('user-agent') });
   return c.json({ success: true });

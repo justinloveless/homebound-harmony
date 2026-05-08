@@ -74,9 +74,11 @@ async function deriveKeyBytes(password: string, saltB64: string): Promise<Uint8A
 }
 
 async function importAesKey(raw: Uint8Array, usages: KeyUsage[]): Promise<CryptoKey> {
-  // Copy into a dedicated ArrayBuffer to satisfy strict WebCrypto typings.
-  const buf = raw.slice().buffer;
-  return crypto.subtle.importKey('raw', buf, { name: 'AES-GCM' }, false, usages);
+  // Copy into a standalone buffer — `raw.buffer` may be oversized (subarray/slice views),
+  // which breaks `importKey` in Node/jsdom WebCrypto.
+  const copy = new Uint8Array(raw.byteLength);
+  copy.set(raw);
+  return crypto.subtle.importKey('raw', copy, { name: 'AES-GCM' }, false, usages);
 }
 
 export async function derivePdk(password: string, saltB64: string): Promise<CryptoKey> {
@@ -193,4 +195,85 @@ export async function exportShareKeyAsHex(key: CryptoKey): Promise<string> {
 
 export async function importShareKeyFromHex(hex: string): Promise<CryptoKey> {
   return importRawKey(hexToBytes(hex));
+}
+
+// ---- ECDH (P-256) workspace sharing ------------------------------------
+
+export const DEVICE_ECDH_STORAGE_KEY = 'routecare_ecdh_pkcs8';
+
+const ECDH_P256 = { name: 'ECDH' as const, namedCurve: 'P-256' as const };
+
+export async function generateEcdhDeviceKeyPair(): Promise<CryptoKeyPair> {
+  return crypto.subtle.generateKey(ECDH_P256, true, ['deriveBits', 'deriveKey']);
+}
+
+export async function exportEcdhPublicKeySpki(publicKey: CryptoKey): Promise<string> {
+  const buf = await crypto.subtle.exportKey('spki', publicKey);
+  return bytesToBase64(new Uint8Array(buf));
+}
+
+export async function exportEcdhPrivatePkcs8(privateKey: CryptoKey): Promise<string> {
+  const buf = await crypto.subtle.exportKey('pkcs8', privateKey);
+  return bytesToBase64(new Uint8Array(buf));
+}
+
+export async function importEcdhPrivatePkcs8(b64: string): Promise<CryptoKey> {
+  const raw = base64ToBytes(b64);
+  return crypto.subtle.importKey('pkcs8', raw, ECDH_P256, true, ['deriveBits', 'deriveKey']);
+}
+
+export async function importEcdhPublicSpki(b64: string): Promise<CryptoKey> {
+  const raw = base64ToBytes(b64);
+  return crypto.subtle.importKey('spki', raw, ECDH_P256, false, []);
+}
+
+/** JSON envelope stored as `wrapped_workspace_key` for ECDH-wrapped members. */
+export async function wrapWorkspaceKeyForPeer(wk: CryptoKey, peerPublicKeySpkiB64: string): Promise<string> {
+  const peerPub = await importEcdhPublicSpki(peerPublicKeySpkiB64);
+  const ephemeral = await crypto.subtle.generateKey(ECDH_P256, true, ['deriveBits', 'deriveKey']);
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: peerPub },
+    ephemeral.privateKey,
+    256,
+  );
+  const aes = await importAesKey(new Uint8Array(sharedBits), ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']);
+  const wkWrap = await wrapKey(wk, aes);
+  const ephPub = await crypto.subtle.exportKey('spki', ephemeral.publicKey);
+  return JSON.stringify({
+    v: 1,
+    alg: 'ecdh-p256',
+    ephPub: bytesToBase64(new Uint8Array(ephPub)),
+    wkWrap,
+  });
+}
+
+export async function unwrapWorkspaceKeyFromPeer(envelopeJson: string, privateKey: CryptoKey): Promise<CryptoKey> {
+  const parsed = JSON.parse(envelopeJson) as { ephPub: string; wkWrap: string };
+  const eph = await importEcdhPublicSpki(parsed.ephPub);
+  const sharedBits = await crypto.subtle.deriveBits(
+    { name: 'ECDH', public: eph },
+    privateKey,
+    256,
+  );
+  const aes = await importAesKey(new Uint8Array(sharedBits), ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']);
+  return unwrapKey(parsed.wkWrap, aes);
+}
+
+/** Unwrap server `wrappedWorkspaceKey`: password (PDK) for owners, or ECDH device key for invited members. */
+export async function unwrapWorkspaceKeyFromServerWrap(
+  wrappedWorkspaceKey: string,
+  opts: { password: string; pdkSalt: string },
+): Promise<CryptoKey> {
+  if (wrappedWorkspaceKey.trimStart().startsWith('{')) {
+    const raw = localStorage.getItem(DEVICE_ECDH_STORAGE_KEY);
+    if (!raw) {
+      throw new Error(
+        'This workspace key uses a device key. Open Settings and enroll a device key on this browser, then ask for a new invite.',
+      );
+    }
+    const sk = await importEcdhPrivatePkcs8(raw);
+    return unwrapWorkspaceKeyFromPeer(wrappedWorkspaceKey, sk);
+  }
+  const pdk = await derivePdk(opts.password, opts.pdkSalt);
+  return unwrapKey(wrappedWorkspaceKey, pdk);
 }

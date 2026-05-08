@@ -5,6 +5,7 @@
 //  Created by Justin Noel Loveless on 5/5/26.
 //
 
+import Foundation
 import Testing
 @testable import RouteCare
 
@@ -165,6 +166,137 @@ struct RouteCareTests {
             breaks: [],
             schedulingStrategy: .spread
         )
+    }
+
+    @Test func eventReducerAppliesClientAddedThenRemoved() throws {
+        let base = defaultWorkspace
+        let enc = JSONEncoder()
+        let client = makeClient(
+            id: "c-audit",
+            timeWindows: [
+                TimeWindow(day: .monday, startTime: "09:00", endTime: "12:00")
+            ]
+        )
+        let clientData = try enc.encode(client)
+        let clientObj = try #require(JSONSerialization.jsonObject(with: clientData) as? [String: Any])
+
+        let addEv: [String: Any] = [
+            "kind": "client_added",
+            "payload": clientObj,
+            "clientEventId": "evt-add-1",
+            "claimedAt": "2026-01-01T12:00:00.000Z",
+        ]
+        let mid = try EventReducer.apply(base, event: addEv)
+        #expect(mid.clients.contains { $0.id == "c-audit" })
+
+        let removeEv: [String: Any] = [
+            "kind": "client_removed",
+            "payload": ["id": "c-audit"],
+            "clientEventId": "evt-rm-1",
+            "claimedAt": "2026-01-01T12:01:00.000Z",
+        ]
+        let end = try EventReducer.apply(mid, event: removeEv)
+        #expect(end.clients.contains { $0.id == "c-audit" } == false)
+    }
+
+    @Test func eventReducerScheduleSetNullClearsLastSchedule() throws {
+        var ws = defaultWorkspace
+        let sched = WeekSchedule(
+            weekStartDate: "2026-05-04",
+            days: [],
+            totalTravelMinutes: 0,
+            totalTimeAwayMinutes: 0,
+            clientGroups: nil,
+            unmetVisits: nil,
+            recommendedDrops: nil
+        )
+        ws.lastSchedule = sched
+
+        let ev: [String: Any] = [
+            "kind": "schedule_set",
+            "payload": NSNull(),
+            "clientEventId": "evt-sch-null",
+            "claimedAt": "2026-01-01T00:00:00.000Z",
+        ]
+        let out = try EventReducer.apply(ws, event: ev)
+        #expect(out.lastSchedule == nil)
+    }
+
+    @Test func visitRuntimeReplayerRebuildsFromVisitEvents() throws {
+        let events: [[String: Any]] = [
+            [
+                "kind": "visit_started",
+                "clientEventId": "a",
+                "claimedAt": "2026-05-01T10:00:00Z",
+                "payload": [
+                    "dayDate": "2026-05-01",
+                    "visitIndex": 0,
+                    "clientId": "c1",
+                    "verifiedArrival": true,
+                    "checkedInAt": "2026-05-01T10:00:00Z",
+                ],
+            ],
+            [
+                "kind": "visit_note_added",
+                "clientEventId": "b",
+                "claimedAt": "2026-05-01T10:05:00Z",
+                "payload": [
+                    "dayDate": "2026-05-01",
+                    "visitIndex": 0,
+                    "clientId": "c1",
+                    "note": "First note",
+                ],
+            ],
+            [
+                "kind": "visit_completed",
+                "clientEventId": "c",
+                "claimedAt": "2026-05-01T11:00:00Z",
+                "payload": [
+                    "dayDate": "2026-05-01",
+                    "visitIndex": 0,
+                    "clientId": "c1",
+                    "completedAt": "2026-05-01T11:00:00Z",
+                ],
+            ],
+        ]
+        let states = VisitRuntimeReplayer.buildStates(from: events)
+        #expect(states.count == 1)
+        let s = try #require(states.first)
+        #expect(s.dayDate == "2026-05-01")
+        #expect(s.visitIndex == 0)
+        #expect(s.clientId == "c1")
+        #expect(s.verifiedArrival == true)
+        #expect(s.completedAt != nil)
+        #expect(s.visitNote == "First note")
+    }
+
+    @Test func eventReducerReplayMatchesSequentialApply() throws {
+        let base = defaultWorkspace
+        let enc = JSONEncoder()
+        let client = makeClient(
+            id: "c-replay",
+            timeWindows: [TimeWindow(day: .tuesday, startTime: "10:00", endTime: "11:00")]
+        )
+        let clientObj = try #require(
+            JSONSerialization.jsonObject(with: try enc.encode(client)) as? [String: Any]
+        )
+        let events: [[String: Any]] = [
+            [
+                "kind": "client_added",
+                "payload": clientObj,
+                "clientEventId": "r1",
+                "claimedAt": "2026-01-01T00:00:00.000Z",
+            ],
+            [
+                "kind": "client_removed",
+                "payload": ["id": "c-replay"],
+                "clientEventId": "r2",
+                "claimedAt": "2026-01-01T00:00:01.000Z",
+            ],
+        ]
+        let sequential = try events.reduce(base) { try EventReducer.apply($0, event: $1) }
+        let replayed = try EventReducer.replay(base, events: events)
+        #expect(sequential.clients.count == replayed.clients.count)
     }
 
     private func makeClient(
