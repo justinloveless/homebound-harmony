@@ -4,6 +4,8 @@ import { db } from '../db/client';
 import { travelTimes } from '../db/schema';
 import { requireUser } from '../auth/middleware';
 import { requireTenant } from '../services/tenantContext';
+import { appendDomainEventBestEffort } from '../services/appendDomainEvent';
+import { hashIp } from '../services/ipHash';
 
 const r = new Hono();
 r.use('*', requireUser);
@@ -11,6 +13,12 @@ r.use('*', requireTenant);
 
 function tid(c: { get: (k: string) => unknown }) {
   return c.get('tenantId') as string;
+}
+
+function getClientIp(c: { req: { header: (n: string) => string | undefined } }): string {
+  return (
+    c.req.header('x-forwarded-for')?.split(',')[0].trim() ?? c.req.header('x-real-ip') ?? 'unknown'
+  );
 }
 
 function normalizePair(a: string, b: string): [string, string] {
@@ -54,6 +62,27 @@ r.put('/', async (c) => {
       error: errMap?.[key] ?? null,
     });
   }
+
+  const userId = c.get('userId') as string;
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  const errorsPayload = (errMap && typeof errMap === 'object' ? errMap : {}) as Record<string, unknown>;
+  await appendDomainEventBestEffort({
+    tenantId,
+    authorUserId: userId,
+    kind: 'travel_times_set',
+    payload: matrix as unknown as Record<string, unknown>,
+    ipHash,
+    isClinical: false,
+  });
+  await appendDomainEventBestEffort({
+    tenantId,
+    authorUserId: userId,
+    kind: 'travel_time_errors_set',
+    payload: errorsPayload,
+    ipHash,
+    isClinical: false,
+  });
 
   return c.json({ success: true });
 });

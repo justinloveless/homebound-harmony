@@ -4,6 +4,8 @@ import { db } from '../db/client';
 import { scheduleDays, schedules, scheduleVisits } from '../db/schema';
 import { requireUser } from '../auth/middleware';
 import { requireTenant } from '../services/tenantContext';
+import { appendDomainEventBestEffort } from '../services/appendDomainEvent';
+import { hashIp } from '../services/ipHash';
 
 const r = new Hono();
 r.use('*', requireUser);
@@ -11,6 +13,16 @@ r.use('*', requireTenant);
 
 function tenantId(c: { get: (k: string) => unknown }) {
   return c.get('tenantId') as string;
+}
+
+function sessionUserId(c: { get: (k: string) => unknown }) {
+  return c.get('userId') as string;
+}
+
+function getClientIp(c: { req: { header: (n: string) => string | undefined } }): string {
+  return (
+    c.req.header('x-forwarded-for')?.split(',')[0].trim() ?? c.req.header('x-real-ip') ?? 'unknown'
+  );
 }
 
 // GET /api/schedules
@@ -115,6 +127,18 @@ r.post('/', async (c) => {
   }
 
   const full = await loadScheduleDetail(sch.id);
+  if (full.isCurrent) {
+    const ip = getClientIp(c);
+    const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+    await appendDomainEventBestEffort({
+      tenantId: tid,
+      authorUserId: sessionUserId(c),
+      kind: 'schedule_set',
+      payload: full.weekSchedule as unknown as Record<string, unknown>,
+      ipHash,
+      isClinical: false,
+    });
+  }
   return c.json(full, 201);
 });
 
@@ -192,6 +216,18 @@ r.put('/:id', async (c) => {
   }
 
   const full = await loadScheduleDetail(id);
+  if (full.isCurrent) {
+    const ip = getClientIp(c);
+    const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+    await appendDomainEventBestEffort({
+      tenantId: tid,
+      authorUserId: sessionUserId(c),
+      kind: 'schedule_set',
+      payload: full.weekSchedule as unknown as Record<string, unknown>,
+      ipHash,
+      isClinical: false,
+    });
+  }
   return c.json(full);
 });
 
@@ -206,6 +242,24 @@ r.post('/:id/activate', async (c) => {
   await db.update(schedules).set({ isCurrent: true }).where(eq(schedules.id, id));
 
   const full = await loadScheduleDetail(id);
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  await appendDomainEventBestEffort({
+    tenantId: tid,
+    authorUserId: sessionUserId(c),
+    kind: 'saved_schedule_loaded',
+    payload: { id },
+    ipHash,
+    isClinical: false,
+  });
+  await appendDomainEventBestEffort({
+    tenantId: tid,
+    authorUserId: sessionUserId(c),
+    kind: 'schedule_set',
+    payload: full.weekSchedule as unknown as Record<string, unknown>,
+    ipHash,
+    isClinical: false,
+  });
   return c.json(full);
 });
 
@@ -215,6 +269,16 @@ r.delete('/:id', async (c) => {
   const id = c.req.param('id');
   const rows = await db.select().from(schedules).where(and(eq(schedules.id, id), eq(schedules.tenantId, tid))).limit(1);
   if (!rows[0]) return c.json({ error: 'Not found' }, 404);
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  await appendDomainEventBestEffort({
+    tenantId: tid,
+    authorUserId: sessionUserId(c),
+    kind: 'saved_schedule_removed',
+    payload: { id },
+    ipHash,
+    isClinical: false,
+  });
   await db.delete(schedules).where(eq(schedules.id, id));
   return c.json({ success: true });
 });

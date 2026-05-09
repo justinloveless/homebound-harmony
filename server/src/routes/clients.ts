@@ -4,6 +4,8 @@ import { db } from '../db/client';
 import { clientTimeWindows, clients } from '../db/schema';
 import { requireUser } from '../auth/middleware';
 import { requireTenant } from '../services/tenantContext';
+import { appendDomainEventBestEffort } from '../services/appendDomainEvent';
+import { hashIp } from '../services/ipHash';
 
 const r = new Hono();
 r.use('*', requireUser);
@@ -11,6 +13,16 @@ r.use('*', requireTenant);
 
 function tenantId(c: { get: (k: string) => unknown }) {
   return c.get('tenantId') as string;
+}
+
+function sessionUserId(c: { get: (k: string) => unknown }) {
+  return c.get('userId') as string;
+}
+
+function getClientIp(c: { req: { header: (n: string) => string | undefined } }): string {
+  return (
+    c.req.header('x-forwarded-for')?.split(',')[0].trim() ?? c.req.header('x-real-ip') ?? 'unknown'
+  );
 }
 
 async function loadWindowsForClients(clientIds: string[]) {
@@ -210,6 +222,35 @@ r.post('/import', async (c) => {
     return c.json({ error: 'Import failed' }, 500);
   }
 
+  const userId = sessionUserId(c);
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  if (insertedIds.length > 0) {
+    const importedRows = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.tenantId, tid), inArray(clients.id, insertedIds)));
+    const wm = await loadWindowsForClients(insertedIds);
+    for (const cl of importedRows) {
+      const serialized = serializeClient(
+        cl,
+        (wm.get(cl.id) ?? []).map((w) => ({ day: w.day, startTime: w.startTime, endTime: w.endTime })),
+      ) as unknown as Record<string, unknown>;
+      const hasCoords = cl.lat != null && cl.lon != null;
+      await appendDomainEventBestEffort({
+        tenantId: tid,
+        authorUserId: userId,
+        kind: 'client_added',
+        payload: serialized,
+        ipHash,
+        isClinical: hasCoords,
+        gpsLat: cl.lat,
+        gpsLon: cl.lon,
+        gpsCapturedAt: hasCoords ? new Date() : null,
+      });
+    }
+  }
+
   return c.json({ imported: insertedIds.length, ids: insertedIds });
 });
 
@@ -227,6 +268,7 @@ r.get('/:id', async (c) => {
 // POST /api/clients
 r.post('/', async (c) => {
   const tid = tenantId(c);
+  const userId = sessionUserId(c);
   const body = await c.req.json().catch(() => null);
   if (!body?.name && body?.name !== '') return c.json({ error: 'Missing name' }, 400);
 
@@ -259,15 +301,31 @@ r.post('/', async (c) => {
   }
 
   const wm = await loadWindowsForClients([inserted.id]);
-  return c.json(
-    serializeClient(inserted, (wm.get(inserted.id) ?? []).map((w) => ({ day: w.day, startTime: w.startTime, endTime: w.endTime }))),
-    201,
-  );
+  const serialized = serializeClient(
+    inserted,
+    (wm.get(inserted.id) ?? []).map((w) => ({ day: w.day, startTime: w.startTime, endTime: w.endTime })),
+  ) as unknown as Record<string, unknown>;
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  const hasCoords = inserted.lat != null && inserted.lon != null;
+  await appendDomainEventBestEffort({
+    tenantId: tid,
+    authorUserId: userId,
+    kind: 'client_added',
+    payload: serialized,
+    ipHash,
+    isClinical: hasCoords,
+    gpsLat: inserted.lat,
+    gpsLon: inserted.lon,
+    gpsCapturedAt: hasCoords ? new Date() : null,
+  });
+  return c.json(serialized, 201);
 });
 
 // PUT /api/clients/:id
 r.put('/:id', async (c) => {
   const tid = tenantId(c);
+  const userId = sessionUserId(c);
   const id = c.req.param('id');
   const body = await c.req.json().catch(() => null);
   if (!body) return c.json({ error: 'Invalid JSON' }, 400);
@@ -309,18 +367,42 @@ r.put('/:id', async (c) => {
 
   const updated = (await db.select().from(clients).where(eq(clients.id, id)).limit(1))[0]!;
   const wm = await loadWindowsForClients([id]);
-  return c.json(
-    serializeClient(updated, (wm.get(id) ?? []).map((w) => ({ day: w.day, startTime: w.startTime, endTime: w.endTime }))),
-  );
+  const serialized = serializeClient(updated, (wm.get(id) ?? []).map((w) => ({ day: w.day, startTime: w.startTime, endTime: w.endTime })));
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  const hasCoords = updated.lat != null && updated.lon != null;
+  await appendDomainEventBestEffort({
+    tenantId: tid,
+    authorUserId: userId,
+    kind: 'client_updated',
+    payload: serialized as unknown as Record<string, unknown>,
+    ipHash,
+    isClinical: hasCoords,
+    gpsLat: updated.lat,
+    gpsLon: updated.lon,
+    gpsCapturedAt: hasCoords ? new Date() : null,
+  });
+  return c.json(serialized);
 });
 
 // DELETE /api/clients/:id
 r.delete('/:id', async (c) => {
   const tid = tenantId(c);
+  const userId = sessionUserId(c);
   const id = c.req.param('id');
   const rows = await db.select().from(clients).where(and(eq(clients.id, id), eq(clients.tenantId, tid))).limit(1);
   if (!rows[0]) return c.json({ error: 'Not found' }, 404);
   await db.delete(clients).where(eq(clients.id, id));
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  await appendDomainEventBestEffort({
+    tenantId: tid,
+    authorUserId: userId,
+    kind: 'client_removed',
+    payload: { id },
+    ipHash,
+    isClinical: false,
+  });
   return c.json({ success: true });
 });
 

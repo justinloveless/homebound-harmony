@@ -4,10 +4,18 @@ import { db } from '../db/client';
 import { workerBreaks, workers } from '../db/schema';
 import { requireUser } from '../auth/middleware';
 import { requireTenant } from '../services/tenantContext';
+import { appendDomainEventBestEffort } from '../services/appendDomainEvent';
+import { hashIp } from '../services/ipHash';
 
 const r = new Hono();
 r.use('*', requireUser);
 r.use('*', requireTenant);
+
+function getClientIp(c: { req: { header: (n: string) => string | undefined } }): string {
+  return (
+    c.req.header('x-forwarded-for')?.split(',')[0].trim() ?? c.req.header('x-real-ip') ?? 'unknown'
+  );
+}
 
 function ctxTenant(c: { get: (k: string) => unknown }) {
   return {
@@ -113,6 +121,17 @@ r.put('/:id', async (c) => {
 
   const breaks = await db.select().from(workerBreaks).where(eq(workerBreaks.workerId, id));
   const updated = (await db.select().from(workers).where(eq(workers.id, id)).limit(1))[0]!;
+  const payload = serializeWorker(updated, breaks) as unknown as Record<string, unknown>;
+  const ip = getClientIp(c);
+  const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
+  await appendDomainEventBestEffort({
+    tenantId,
+    authorUserId: userId,
+    kind: 'worker_updated',
+    payload,
+    ipHash,
+    isClinical: false,
+  });
   return c.json({ id: updated.id, userId: updated.userId, ...serializeWorker(updated, breaks) });
 });
 
