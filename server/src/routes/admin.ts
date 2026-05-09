@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { db } from '../db/client';
 import { auditEvents, domainEvents, tenantMembers, tenants, users } from '../db/schema';
-import { and, asc, count, desc, eq, gt, ilike, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, ilike, inArray, isNull } from 'drizzle-orm';
 import { requireUser, requireAdmin } from '../auth/middleware';
 import { deleteAllSessionsForUser } from '../auth/session';
 import { logEvent } from '../services/audit';
+import { CLIENT_DATA_EVENT_KINDS, domainEventListSummary } from '../services/domainEventSummarySql';
 import { isMfaDisabledEmail } from '../auth/mfaBypass';
 
 const admin = new Hono();
@@ -184,12 +185,18 @@ admin.get('/domain-events', async (c) => {
   const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const tenantId = c.req.query('tenantId')?.trim();
   const authorUserId = c.req.query('authorUserId')?.trim();
+  const kindExact = c.req.query('kind')?.trim();
+  const clientDataOnlyRaw = c.req.query('clientDataOnly');
+  const clientDataOnly =
+    clientDataOnlyRaw === '1' || clientDataOnlyRaw?.toLowerCase() === 'true';
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '50')));
   const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
 
   const predicates = [];
   if (tenantId) predicates.push(eq(domainEvents.tenantId, tenantId));
   if (authorUserId) predicates.push(eq(domainEvents.authorUserId, authorUserId));
+  if (kindExact) predicates.push(eq(domainEvents.kind, kindExact));
+  if (clientDataOnly) predicates.push(inArray(domainEvents.kind, [...CLIENT_DATA_EVENT_KINDS]));
   const combined = predicates.length ? and(...predicates) : undefined;
 
   const countBase = db.select({ total: count() }).from(domainEvents);
@@ -203,6 +210,7 @@ admin.get('/domain-events', async (c) => {
       seq: domainEvents.seq,
       clientEventId: domainEvents.clientEventId,
       kind: domainEvents.kind,
+      summary: domainEventListSummary,
       serverReceivedAt: domainEvents.serverReceivedAt,
       clientClaimedAt: domainEvents.clientClaimedAt,
       isClinical: domainEvents.isClinical,
@@ -221,7 +229,7 @@ admin.get('/domain-events', async (c) => {
   await logEvent({
     action: 'admin_data_events_list',
     userId: operatorId,
-    artifactId: tenantId ?? authorUserId ?? undefined,
+    artifactId: tenantId ?? authorUserId ?? kindExact ?? (clientDataOnly ? 'client_data' : undefined),
     ip: getClientIp(c),
     userAgent: getUa(c),
   });
@@ -235,6 +243,7 @@ admin.get('/domain-events', async (c) => {
       tenantId: r.tenantId,
       seq: r.seq,
       kind: r.kind,
+      summary: r.summary,
       clientEventId: r.clientEventId,
       serverReceivedAt: r.serverReceivedAt.toISOString(),
       clientClaimedAt: r.clientClaimedAt.toISOString(),

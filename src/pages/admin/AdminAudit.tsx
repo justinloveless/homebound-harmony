@@ -31,6 +31,8 @@ interface DomainEventRow {
   tenantId: string;
   seq: number | bigint;
   kind: string;
+  /** Human-readable description derived from kind + payload (server-side). */
+  summary: string;
   clientEventId: string;
   serverReceivedAt: string;
   clientClaimedAt: string;
@@ -63,6 +65,9 @@ export default function AdminAuditPage() {
   const [auditOffset, setAuditOffset] = useState(0);
 
   const [tenantFilter, setTenantFilter] = useState('');
+  const [authorUserIdFilter, setAuthorUserIdFilter] = useState('');
+  const [kindFilter, setKindFilter] = useState('');
+  const [clientDataOnly, setClientDataOnly] = useState(false);
   const [domainRows, setDomainRows] = useState<DomainEventRow[]>([]);
   const [domainTotal, setDomainTotal] = useState(0);
   const [domainLimit, setDomainLimit] = useState<number>(50);
@@ -81,16 +86,24 @@ export default function AdminAuditPage() {
     setAuditRows(res.events);
   }, [auditLimit, auditOffset, userId]);
 
-  const loadDomain = useCallback(async () => {
-    const qs = new URLSearchParams({
-      limit: String(domainLimit),
-      offset: String(domainOffset),
-    });
-    if (tenantFilter.trim()) qs.set('tenantId', tenantFilter.trim());
-    const res = await api.get<{ total: number; events: DomainEventRow[] }>(`/api/admin/domain-events?${qs}`);
-    setDomainTotal(res.total);
-    setDomainRows(res.events);
-  }, [domainLimit, domainOffset, tenantFilter]);
+  const loadDomain = useCallback(
+    async (opts?: { resetPage?: boolean }) => {
+      const offset = opts?.resetPage ? 0 : domainOffset;
+      if (opts?.resetPage) setDomainOffset(0);
+      const qs = new URLSearchParams({
+        limit: String(domainLimit),
+        offset: String(offset),
+      });
+      if (tenantFilter.trim()) qs.set('tenantId', tenantFilter.trim());
+      if (authorUserIdFilter.trim()) qs.set('authorUserId', authorUserIdFilter.trim());
+      if (kindFilter.trim()) qs.set('kind', kindFilter.trim());
+      if (clientDataOnly) qs.set('clientDataOnly', 'true');
+      const res = await api.get<{ total: number; events: DomainEventRow[] }>(`/api/admin/domain-events?${qs}`);
+      setDomainTotal(res.total);
+      setDomainRows(res.events);
+    },
+    [domainLimit, domainOffset, tenantFilter, authorUserIdFilter, kindFilter, clientDataOnly],
+  );
 
   useEffect(() => {
     void loadAudit().catch(() => toast.error('Could not load audit log'));
@@ -159,6 +172,10 @@ export default function AdminAuditPage() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
+              Security and admin actions (sign-in, MFA, share links, admin views). Client roster edits and visits
+              appear under Domain events below, not here.
+            </p>
+            <p className="text-xs text-muted-foreground">
               Total {auditTotal}. Showing {auditRows.length} rows.
             </p>
             <div className="overflow-x-auto text-sm border rounded-md">
@@ -168,6 +185,7 @@ export default function AdminAuditPage() {
                     <th className="text-left p-2">Time</th>
                     <th className="text-left p-2">Action</th>
                     <th className="text-left p-2">User</th>
+                    <th className="text-left p-2">Artifact / target</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -176,6 +194,9 @@ export default function AdminAuditPage() {
                       <td className="p-2 whitespace-nowrap">{new Date(r.occurredAt).toLocaleString()}</td>
                       <td className="p-2">{r.action}</td>
                       <td className="p-2">{r.userEmail ?? r.userId ?? '—'}</td>
+                      <td className="p-2 font-mono text-xs max-w-[14rem] truncate" title={r.artifactId ?? undefined}>
+                        {r.artifactId ?? '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -189,16 +210,44 @@ export default function AdminAuditPage() {
             <CardTitle>Domain events</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Workspace changes synced from the app (clients, schedules, visits, etc.). Turn on &quot;Client data
+              only&quot; or filter by author to see who changed roster or client records.
+            </p>
             <div className="flex gap-2 flex-wrap items-end">
               <div>
                 <label className="text-xs text-muted-foreground">Tenant id</label>
                 <Input
                   value={tenantFilter}
                   onChange={(e) => setTenantFilter(e.target.value)}
-                  placeholder="filter"
+                  placeholder="uuid"
                 />
               </div>
-              <Button type="button" onClick={() => void loadDomain()}>
+              <div>
+                <label className="text-xs text-muted-foreground">Author user id</label>
+                <Input
+                  value={authorUserIdFilter}
+                  onChange={(e) => setAuthorUserIdFilter(e.target.value)}
+                  placeholder="uuid"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Event kind (exact)</label>
+                <Input
+                  value={kindFilter}
+                  onChange={(e) => setKindFilter(e.target.value)}
+                  placeholder="e.g. client_updated"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={clientDataOnly}
+                  onChange={(e) => setClientDataOnly(e.target.checked)}
+                />
+                Client data only
+              </label>
+              <Button type="button" onClick={() => void loadDomain({ resetPage: true })}>
                 Apply
               </Button>
               <div>
@@ -236,23 +285,31 @@ export default function AdminAuditPage() {
               Total {domainTotal}. Showing {domainRows.length} rows.
             </p>
             <div className="overflow-x-auto text-sm border rounded-md">
-              <table className="w-full">
+              <table className="w-full table-fixed">
                 <thead>
                   <tr className="border-b bg-muted/50">
-                    <th className="text-left p-2">Seq</th>
-                    <th className="text-left p-2">Kind</th>
-                    <th className="text-left p-2">Tenant</th>
-                    <th className="text-left p-2">Author</th>
-                    <th className="text-left p-2" />
+                    <th className="text-left p-2 w-14">Seq</th>
+                    <th className="text-left p-2 w-28">Received</th>
+                    <th className="text-left p-2 w-36">Kind</th>
+                    <th className="text-left p-2">Summary</th>
+                    <th className="text-left p-2 w-24">Tenant</th>
+                    <th className="text-left p-2 w-36">Author</th>
+                    <th className="text-left p-2 w-24" />
                   </tr>
                 </thead>
                 <tbody>
                   {domainRows.map((r) => (
-                    <tr key={r.id} className="border-b">
+                    <tr key={r.id} className="border-b align-top">
                       <td className="p-2">{String(r.seq)}</td>
-                      <td className="p-2">{r.kind}</td>
-                      <td className="p-2 font-mono text-xs">{r.tenantId.slice(0, 8)}…</td>
-                      <td className="p-2">{r.authorEmail ?? r.authorUserId}</td>
+                      <td className="p-2 whitespace-nowrap text-xs">
+                        {new Date(r.serverReceivedAt).toLocaleString()}
+                      </td>
+                      <td className="p-2 font-mono text-xs break-all">{r.kind}</td>
+                      <td className="p-2">{r.summary ?? r.kind}</td>
+                      <td className="p-2 font-mono text-xs break-all" title={r.tenantId}>
+                        {r.tenantId.slice(0, 8)}…
+                      </td>
+                      <td className="p-2 break-all text-xs">{r.authorEmail ?? r.authorUserId}</td>
                       <td className="p-2">
                         <Button size="sm" variant="outline" onClick={() => void openDetail(r.id)}>
                           Detail
