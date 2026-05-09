@@ -1,20 +1,19 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { api, ApiError, setActiveWorkspaceId } from '@/lib/api';
-import { unwrapWorkspaceKeyFromServerWrap } from '@/lib/crypto';
+import React, { useCallback, useContext, useEffect, useState } from 'react';
+import { api, setActiveTenantId, ApiError } from '@/lib/api';
 
-// Auth state machine. The WK never touches localStorage; on reload we
-// re-derive it from password (`unlock`) once `/api/auth/me` confirms the
-// session cookie is still valid.
-export type AuthStatus =
-  | 'checking'    // initial /api/auth/me call in flight
-  | 'anonymous'   // no session — show /login or /register
-  | 'locked'      // valid session, but we need password to unwrap WK
-  | 'unlocked';   // WK in memory; app is usable
+export type AuthStatus = 'checking' | 'anonymous' | 'authenticated';
+
+export interface TenantInfo {
+  id: string;
+  slug: string;
+  name: string;
+  role: string;
+}
 
 export interface AuthMe {
   id: string;
   email: string;
-  pdkSalt: string;
+  tenants: TenantInfo[];
   totpEnrolled: boolean;
   mfaDisabled?: boolean;
   isAdmin?: boolean;
@@ -23,21 +22,23 @@ export interface AuthMe {
 interface AuthContextValue {
   status: AuthStatus;
   me: AuthMe | null;
-  workspaceKey: CryptoKey | null;
+  activeTenantId: string | null;
+  setActiveTenant: (tenantId: string) => void;
   login: (email: string, password: string, code?: string) => Promise<void>;
-  unlock: (password: string) => Promise<void>;
   logout: () => Promise<void>;
-  // After registration completes (and login finishes), this lets the
-  // register page hand the WK over to the auth state without a fresh login.
-  setUnlockedSession: (me: AuthMe, wk: CryptoKey, workspaceId?: string | null) => void;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+const AuthContext = React.createContext<AuthContextValue | null>(null);
+
+function pickDefaultTenant(tenants: TenantInfo[]): string | null {
+  if (tenants.length === 0) return null;
+  return tenants[0].id;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [me, setMe] = useState<AuthMe | null>(null);
-  const [workspaceKey, setWorkspaceKey] = useState<CryptoKey | null>(null);
+  const [activeTenantId, setActiveTenantIdState] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,7 +47,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = await api.get<AuthMe>('/api/auth/me');
         if (cancelled) return;
         setMe(data);
-        setStatus('locked');
+        const tid = pickDefaultTenant(data.tenants);
+        setActiveTenantId(tid);
+        setActiveTenantIdState(tid);
+        setStatus('authenticated');
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
@@ -57,64 +61,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const setActiveTenant = useCallback((tenantId: string) => {
+    setActiveTenantId(tenantId);
+    setActiveTenantIdState(tenantId);
   }, []);
 
   const login = useCallback(async (email: string, password: string, code?: string) => {
-    await api.post<{ pdkSalt: string }>('/api/auth/login', { email, password, code });
+    await api.post('/api/auth/login', { email, password, code });
     const meData = await api.get<AuthMe>('/api/auth/me');
-    const blob = await api.get<{ wrappedWorkspaceKey: string; workspaceId?: string }>('/api/snapshot');
-    if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
-    let wk: CryptoKey;
-    try {
-      wk = await unwrapWorkspaceKeyFromServerWrap(blob.wrappedWorkspaceKey, {
-        password,
-        pdkSalt: meData.pdkSalt,
-      });
-    } catch (e) {
-      throw e instanceof Error ? e : new Error('Could not unlock workspace');
-    }
     setMe(meData);
-    setWorkspaceKey(wk);
-    setStatus('unlocked');
+    const tid = pickDefaultTenant(meData.tenants);
+    setActiveTenantId(tid);
+    setActiveTenantIdState(tid);
+    setStatus('authenticated');
   }, []);
 
-  const unlock = useCallback(async (password: string) => {
-    if (!me) throw new Error('No session to unlock');
-    const meData = await api.get<AuthMe>('/api/auth/me');
-    setMe(meData);
-    const blob = await api.get<{ wrappedWorkspaceKey: string; workspaceId?: string }>('/api/snapshot');
-    if (blob.workspaceId) setActiveWorkspaceId(blob.workspaceId);
-    let wk: CryptoKey;
-    try {
-      wk = await unwrapWorkspaceKeyFromServerWrap(blob.wrappedWorkspaceKey, {
-        password,
-        pdkSalt: meData.pdkSalt,
-      });
-    } catch {
-      throw new Error('Incorrect password or missing device key');
-    }
-    setWorkspaceKey(wk);
-    setStatus('unlocked');
-  }, [me]);
-
   const logout = useCallback(async () => {
-    try { await api.post('/api/auth/logout'); } catch { /* ignore */ }
-    setActiveWorkspaceId(null);
+    try {
+      await api.post('/api/auth/logout');
+    } catch {
+      /* ignore */
+    }
+    setActiveTenantId(null);
     setMe(null);
-    setWorkspaceKey(null);
+    setActiveTenantIdState(null);
     setStatus('anonymous');
   }, []);
 
-  const setUnlockedSession = useCallback((meData: AuthMe, wk: CryptoKey, workspaceId?: string | null) => {
-    if (workspaceId) setActiveWorkspaceId(workspaceId);
-    setMe(meData);
-    setWorkspaceKey(wk);
-    setStatus('unlocked');
-  }, []);
-
   return (
-    <AuthContext.Provider value={{ status, me, workspaceKey, login, unlock, logout, setUnlockedSession }}>
+    <AuthContext.Provider
+      value={{
+        status,
+        me,
+        activeTenantId,
+        setActiveTenant,
+        login,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

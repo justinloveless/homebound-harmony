@@ -10,13 +10,11 @@ interface AdminUserRow {
   id: string;
   email: string;
   createdAt: string;
-  workspaces: {
-    workspaceId: string;
-    version: number;
-    snapshotSeq: number;
-    headSeq: number;
-    updatedAt: string;
-    keyEpoch: number;
+  tenants: {
+    tenantId: string;
+    slug: string;
+    name: string;
+    role: string;
   }[];
 }
 
@@ -68,7 +66,7 @@ export default function AdminUsersPage() {
                   {u.email}
                 </Link>
                 <span className="text-xs text-muted-foreground ml-2">
-                  {u.workspaces.length} workspace(s)
+                  {u.tenants.length} tenant(s)
                 </span>
               </li>
             ))}

@@ -6,12 +6,14 @@ import path from 'node:path';
 import { lookup } from 'node:dns/promises';
 import net from 'node:net';
 import { authRouter } from './routes/auth';
-import { workspaceRouter } from './routes/workspace';
-import { snapshotRouter } from './routes/snapshot';
 import { eventsRouter } from './routes/events';
-import { shareRouter, shareDataHandler } from './routes/share';
 import { adminRouter } from './routes/admin';
-import { workspaceTeamRouter } from './routes/workspaceTeam';
+import { workersRouter } from './routes/workers';
+import { clientsRouter } from './routes/clients';
+import { schedulesRouter } from './routes/schedules';
+import { visitsRouter } from './routes/visits';
+import { travelTimesRouter } from './routes/travelTimes';
+import { tenantsRouter } from './routes/tenants';
 import { adminAllowlistSize } from './auth/admin';
 import { runMigrations } from './db/migrate';
 import { resolveDatabaseUrl } from './db/connection';
@@ -39,27 +41,27 @@ const MIME: Record<string, string> = {
 const app = new Hono();
 
 app.use('*', logger());
-// secureHeaders adds X-Content-Type-Options, Referrer-Policy, etc. We leave
-// the default CSP off because the Vite-built SPA uses inline styles; tighten
-// once we ship a hashed-CSP pipeline.
 app.use('*', secureHeaders());
+
+if (process.env.NODE_ENV === 'production') {
+  app.use('*', async (c, next) => {
+    await next();
+    c.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  });
+}
 
 app.get('/healthz', (c) => c.text('ok'));
 
 app.route('/api/auth', authRouter);
-// Team routes must register before the legacy catch-all `workspace.all('*')` 410 router.
-app.route('/api/workspace', workspaceTeamRouter);
-app.route('/api/workspace', workspaceRouter);
-app.route('/api/snapshot', snapshotRouter);
 app.route('/api/events', eventsRouter);
-app.route('/api/share', shareRouter);
 app.route('/api/admin', adminRouter);
+app.route('/api/workers', workersRouter);
+app.route('/api/clients', clientsRouter);
+app.route('/api/schedules', schedulesRouter);
+app.route('/api/visits', visitsRouter);
+app.route('/api/travel-times', travelTimesRouter);
+app.route('/api/tenant', tenantsRouter);
 
-// Public share data endpoint — anyone with the URL fragment key can read.
-app.get('/s/:id/data', shareDataHandler);
-
-// Static SPA fallback. The combined Docker image copies the web build into
-// /app/public; locally we run `vite` separately and don't hit this branch.
 const PUBLIC_DIR = path.resolve(process.env.PUBLIC_DIR ?? './public');
 
 async function readIfExists(absPath: string): Promise<Buffer | null> {
@@ -76,20 +78,19 @@ app.get('*', async (c) => {
   const url = new URL(c.req.url);
   if (url.pathname.startsWith('/api/')) return c.json({ error: 'Not found' }, 404);
 
-  // Resolve under PUBLIC_DIR and reject any path traversal.
   const requested = path.resolve(PUBLIC_DIR, '.' + url.pathname);
   if (requested.startsWith(PUBLIC_DIR)) {
     const direct = await readIfExists(requested);
     if (direct) {
       const ext = path.extname(requested).toLowerCase();
-      return new Response(direct as any, {
+      return new Response(direct as unknown as BodyInit, {
         headers: { 'Content-Type': MIME[ext] ?? 'application/octet-stream' },
       });
     }
   }
 
   const index = await readIfExists(path.join(PUBLIC_DIR, 'index.html'));
-  if (index) return new Response(index as any, { headers: { 'Content-Type': MIME['.html'] } });
+  if (index) return new Response(index as unknown as BodyInit, { headers: { 'Content-Type': MIME['.html'] } });
   return c.text('SPA build not found', 404);
 });
 

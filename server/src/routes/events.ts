@@ -1,19 +1,12 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { sql, and, eq, gt, asc } from 'drizzle-orm';
 import { db } from '../db/client';
-import { dataEvents, userEventChain } from '../db/schema';
-import { and, eq, gt, asc, sql } from 'drizzle-orm';
+import { domainEvents, tenantDomainChain } from '../db/schema';
 import { requireUser } from '../auth/middleware';
 import { hashIp } from '../services/ipHash';
-import { computeEventHash, type HashEnvelopeInput } from '../services/eventChain';
-import { resolveWorkspace, resolveWorkspaceFromQuery, canPostEvents } from '../services/workspaceContext';
-
-const sseEventConnections = new Map<string, Set<(msg: { seq: number; hash: string }) => void>>();
-
-export function notifyEventAppend(workspaceId: string, seq: number, hash: string) {
-  const conns = sseEventConnections.get(workspaceId);
-  if (conns) for (const send of conns) send({ seq, hash });
-}
+import { resolveTenantForRequest } from '../services/tenantContext';
+import { subscribeTenantEventSends, notifyDomainEventAppend } from '../services/tenantEventSse';
 
 function getClientIp(c: { req: { header: (n: string) => string | undefined } }): string {
   return c.req.header('x-forwarded-for')?.split(',')[0].trim()
@@ -24,18 +17,12 @@ function getClientIp(c: { req: { header: (n: string) => string | undefined } }):
 const events = new Hono();
 events.use('*', requireUser);
 
-// POST /api/events
 events.post('/', async (c) => {
-  const sessionUserId = (c as any).get('userId') as string;
-  const rw = await resolveWorkspace(c, sessionUserId);
-  if (!rw) {
-    return c.json({ error: 'Workspace not found; set X-Workspace-Id if you belong to several.' }, 404);
-  }
-  if (!canPostEvents(rw.role)) {
-    return c.json({ error: 'Insufficient permission to append events' }, 403);
-  }
+  const sessionUserId = (c as { get: (k: string) => unknown }).get('userId') as string;
+  const rt = await resolveTenantForRequest(c, sessionUserId);
+  if (!rt) return c.json({ error: 'Tenant not found; set X-Tenant-Id or use tenant subdomain.' }, 404);
 
-  const workspaceId = rw.workspaceId;
+  const tenantId = rt.tenantId;
   const body = await c.req.json().catch(() => null);
   if (!body?.events || !Array.isArray(body.events)) {
     return c.json({ error: 'Invalid request: expected { events: [...] }' }, 400);
@@ -43,27 +30,32 @@ events.post('/', async (c) => {
 
   const ip = getClientIp(c);
   const ipHash = ip && ip !== 'unknown' ? await hashIp(ip) : null;
-  const accepted: { clientEventId: string; seq: number; hash: string; serverReceivedAt: string }[] = [];
+  const accepted: { clientEventId: string; seq: number; serverReceivedAt: string }[] = [];
 
   try {
     await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT workspace_id FROM user_event_chain WHERE workspace_id = ${workspaceId}::uuid FOR UPDATE`,
-      );
+      await tx.execute(sql`SELECT tenant_id FROM tenant_domain_chain WHERE tenant_id = ${tenantId}::uuid FOR UPDATE`);
+
+      const chainRows = await tx.select().from(tenantDomainChain).where(eq(tenantDomainChain.tenantId, tenantId));
+      let head = chainRows[0];
+      if (!head) {
+        await tx.insert(tenantDomainChain).values({ tenantId, headSeq: 0 });
+        head = { tenantId, headSeq: 0 };
+      }
 
       for (const raw of body.events as Record<string, unknown>[]) {
         const clientEventId = raw.clientEventId;
         const clientClaimedAt = raw.clientClaimedAt;
+        const kind = raw.kind;
+        const payload = raw.payload ?? {};
         const isClinical = Boolean(raw.isClinical);
-        const ciphertext = raw.ciphertext;
-        const iv = raw.iv;
         if (typeof clientEventId !== 'string' || !clientEventId) {
           throw Object.assign(new Error('bad_event'), { status: 400 });
         }
         if (typeof clientClaimedAt !== 'string') {
           throw Object.assign(new Error('bad_event'), { status: 400 });
         }
-        if (typeof ciphertext !== 'string' || typeof iv !== 'string') {
+        if (typeof kind !== 'string' || !kind) {
           throw Object.assign(new Error('bad_event'), { status: 400 });
         }
 
@@ -79,8 +71,8 @@ events.post('/', async (c) => {
 
         const existing = await tx
           .select()
-          .from(dataEvents)
-          .where(and(eq(dataEvents.workspaceId, workspaceId), eq(dataEvents.clientEventId, clientEventId)))
+          .from(domainEvents)
+          .where(and(eq(domainEvents.tenantId, tenantId), eq(domainEvents.clientEventId, clientEventId)))
           .limit(1);
 
         if (existing.length > 0) {
@@ -88,51 +80,22 @@ events.post('/', async (c) => {
           accepted.push({
             clientEventId: row.clientEventId,
             seq: row.seq,
-            hash: row.hash,
             serverReceivedAt: row.serverReceivedAt.toISOString(),
           });
           continue;
         }
 
-        const chainRows = await tx.select().from(userEventChain).where(eq(userEventChain.workspaceId, workspaceId));
-        let head = chainRows[0];
-        if (!head) {
-          await tx.insert(userEventChain).values({ workspaceId, headSeq: 0, headHash: '' });
-          head = { workspaceId, headSeq: 0, headHash: '' };
-        }
-
         const newSeq = head.headSeq + 1;
-        const prevHash = head.headHash;
         const serverReceivedAt = new Date();
         const serverIso = serverReceivedAt.toISOString();
 
-        // Hash chain scope uses `userId` field name in JSON for backwards compatibility; value is workspace id.
-        const envelope: HashEnvelopeInput = {
-          userId: workspaceId,
-          clientEventId,
-          seq: newSeq,
-          serverReceivedAt: serverIso,
-          ipHash,
-          gpsLat: gpsLat ?? null,
-          gpsLon: gpsLon ?? null,
-          gpsAccuracyM: gpsAccuracyM ?? null,
-          gpsCapturedAt: gpsCapturedAt ?? null,
-          isClinical,
-          ciphertext,
-          iv,
-        };
-
-        const hash = computeEventHash(prevHash, envelope);
-
-        await tx.insert(dataEvents).values({
-          workspaceId,
+        await tx.insert(domainEvents).values({
+          tenantId,
           authorUserId: sessionUserId,
           clientEventId,
           seq: newSeq,
-          prevHash,
-          hash,
-          ciphertext,
-          iv,
+          kind,
+          payload: payload as Record<string, unknown>,
           clientClaimedAt: new Date(clientClaimedAt),
           serverReceivedAt,
           ipHash,
@@ -145,26 +108,27 @@ events.post('/', async (c) => {
         });
 
         await tx
-          .update(userEventChain)
-          .set({ headSeq: newSeq, headHash: hash })
-          .where(eq(userEventChain.workspaceId, workspaceId));
+          .update(tenantDomainChain)
+          .set({ headSeq: newSeq })
+          .where(eq(tenantDomainChain.tenantId, tenantId));
 
+        head = { tenantId, headSeq: newSeq };
         accepted.push({
           clientEventId,
           seq: newSeq,
-          hash,
           serverReceivedAt: serverIso,
         });
       }
     });
-  } catch (e: any) {
-    if (e?.message === 'clinical_gps') {
+  } catch (e: unknown) {
+    const err = e as { message?: string; code?: string };
+    if (err?.message === 'clinical_gps') {
       return c.json({ error: 'Clinical events require gpsLat and gpsLon' }, 422);
     }
-    if (e?.message === 'bad_event') {
+    if (err?.message === 'bad_event') {
       return c.json({ error: 'Invalid event payload' }, 400);
     }
-    if (e?.code === '23505') {
+    if (err?.code === '23505') {
       return c.json({ error: 'Duplicate clientEventId in batch' }, 409);
     }
     console.error('POST /api/events', e);
@@ -172,38 +136,33 @@ events.post('/', async (c) => {
   }
 
   for (const row of accepted) {
-    notifyEventAppend(workspaceId, row.seq, row.hash);
+    notifyDomainEventAppend(tenantId, row.seq);
   }
 
   return c.json({ accepted });
 });
 
-// GET /api/events?since=0&limit=500&workspaceId=...
 events.get('/', async (c) => {
-  const sessionUserId = (c as any).get('userId') as string;
-  const rw = await resolveWorkspaceFromQuery(c, sessionUserId);
-  if (!rw) {
-    return c.json({ error: 'Workspace not found; pass workspaceId query or X-Workspace-Id header.' }, 404);
-  }
+  const sessionUserId = (c as { get: (k: string) => unknown }).get('userId') as string;
+  const rt = await resolveTenantForRequest(c, sessionUserId);
+  if (!rt) return c.json({ error: 'Tenant not found; pass tenantId query or X-Tenant-Id header.' }, 404);
 
   const since = Number(c.req.query('since') ?? '0');
   const limit = Math.min(500, Math.max(1, Number(c.req.query('limit') ?? '100')));
 
   const rows = await db
     .select()
-    .from(dataEvents)
-    .where(and(eq(dataEvents.workspaceId, rw.workspaceId), gt(dataEvents.seq, since)))
-    .orderBy(asc(dataEvents.seq))
+    .from(domainEvents)
+    .where(and(eq(domainEvents.tenantId, rt.tenantId), gt(domainEvents.seq, since)))
+    .orderBy(asc(domainEvents.seq))
     .limit(limit);
 
   return c.json({
     events: rows.map((r) => ({
       clientEventId: r.clientEventId,
       seq: r.seq,
-      prevHash: r.prevHash,
-      hash: r.hash,
-      ciphertext: r.ciphertext,
-      iv: r.iv,
+      kind: r.kind,
+      payload: r.payload,
       clientClaimedAt: r.clientClaimedAt.toISOString(),
       serverReceivedAt: r.serverReceivedAt.toISOString(),
       isClinical: r.isClinical,
@@ -217,24 +176,22 @@ events.get('/', async (c) => {
   });
 });
 
-// GET /api/events/stream?workspaceId=...
 events.get('/stream', (c) => {
-  const sessionUserId = (c as any).get('userId') as string;
+  const sessionUserId = (c as { get: (k: string) => unknown }).get('userId') as string;
 
   return streamSSE(c, async (stream) => {
-    const rw = await resolveWorkspaceFromQuery(c, sessionUserId);
-    if (!rw) {
-      await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: 'workspace not found' }) });
+    const rt = await resolveTenantForRequest(c, sessionUserId);
+    if (!rt) {
+      await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: 'tenant not found' }) });
       return;
     }
-    const workspaceId = rw.workspaceId;
+    const tenantId = rt.tenantId;
 
-    const send = (msg: { seq: number; hash: string }) => {
+    const send = (msg: { seq: number }) => {
       stream.writeSSE({ event: 'update', data: JSON.stringify(msg) }).catch(() => {});
     };
 
-    if (!sseEventConnections.has(workspaceId)) sseEventConnections.set(workspaceId, new Set());
-    sseEventConnections.get(workspaceId)!.add(send);
+    const unsub = subscribeTenantEventSends(tenantId, send);
 
     const heartbeat = setInterval(() => {
       stream.writeSSE({ event: 'heartbeat', data: '' }).catch(() => {});
@@ -242,10 +199,10 @@ events.get('/stream', (c) => {
 
     stream.onAbort(() => {
       clearInterval(heartbeat);
-      sseEventConnections.get(workspaceId)?.delete(send);
+      unsub();
     });
 
-    await new Promise<void>(resolve => {
+    await new Promise<void>((resolve) => {
       setTimeout(resolve, 24 * 60 * 60 * 1000);
     });
   });

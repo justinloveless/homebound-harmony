@@ -53,9 +53,8 @@ export default function LoginPage() {
               {submitting ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
-          <div className="mt-4 text-sm text-muted-foreground space-y-1">
-            <div><Link to="/register" className="underline">Create an account</Link></div>
-            <div><Link to="/recover" className="underline">Forgot password? Use recovery key</Link></div>
+          <div className="mt-4 text-sm text-muted-foreground">
+            <Link to="/register" className="underline">Create an account</Link>
           </div>
         </CardContent>
       </Card>

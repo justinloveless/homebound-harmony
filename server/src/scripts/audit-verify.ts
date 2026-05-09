@@ -1,25 +1,22 @@
 #!/usr/bin/env bun
 /**
- * Verify the tamper-evident hash chain for a workspace's data_events.
- * Usage: bun run audit:verify -- --workspace <uuid>
- * (Legacy: --user <uuid> is accepted as an alias for the workspace id.)
+ * Verify domain_events rows are strictly ordered by seq for a tenant.
+ *
+ *   bun run audit:verify -- --tenant <uuid>
  */
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { asc, eq } from 'drizzle-orm';
-import { dataEvents } from '../db/schema';
-import { computeEventHash, type HashEnvelopeInput } from '../services/eventChain';
+import { domainEvents } from '../db/schema';
 import { resolveDatabaseUrl } from '../db/connection';
 
 const args = process.argv.slice(2);
-let workspaceId: string | undefined;
-const wsIdx = args.indexOf('--workspace');
-const userIdx = args.indexOf('--user');
-if (wsIdx !== -1 && args[wsIdx + 1]) workspaceId = args[wsIdx + 1];
-else if (userIdx !== -1 && args[userIdx + 1]) workspaceId = args[userIdx + 1];
+let tenantId: string | undefined;
+const tIdx = args.indexOf('--tenant');
+if (tIdx !== -1 && args[tIdx + 1]) tenantId = args[tIdx + 1];
 
-if (!workspaceId) {
-  console.error('Usage: bun src/scripts/audit-verify.ts -- --workspace <uuid>');
+if (!tenantId) {
+  console.error('Usage: bun src/scripts/audit-verify.ts -- --tenant <uuid>');
   process.exit(1);
 }
 
@@ -30,39 +27,19 @@ const db = drizzle(pg);
 
 const rows = await db
   .select()
-  .from(dataEvents)
-  .where(eq(dataEvents.workspaceId, workspaceId))
-  .orderBy(asc(dataEvents.seq));
+  .from(domainEvents)
+  .where(eq(domainEvents.tenantId, tenantId))
+  .orderBy(asc(domainEvents.seq));
 
-let prev = '';
+let prev = -1;
 let ok = true;
 for (const r of rows) {
-  if (r.prevHash !== prev) {
-    console.error(`Break at seq=${r.seq}: expected prevHash=${prev}, got ${r.prevHash}`);
+  if (r.seq <= prev) {
+    console.error(`Non-monotonic seq at id=${r.id}: seq=${r.seq} prev=${prev}`);
     ok = false;
     break;
   }
-  const input: HashEnvelopeInput = {
-    userId: workspaceId,
-    clientEventId: r.clientEventId,
-    seq: r.seq,
-    serverReceivedAt: r.serverReceivedAt.toISOString(),
-    ipHash: r.ipHash,
-    gpsLat: r.gpsLat,
-    gpsLon: r.gpsLon,
-    gpsAccuracyM: r.gpsAccuracyM,
-    gpsCapturedAt: r.gpsCapturedAt?.toISOString() ?? null,
-    isClinical: r.isClinical,
-    ciphertext: r.ciphertext,
-    iv: r.iv,
-  };
-  const expected = computeEventHash(prev, input);
-  if (expected !== r.hash) {
-    console.error(`Hash mismatch at seq=${r.seq}`);
-    ok = false;
-    break;
-  }
-  prev = r.hash;
+  prev = r.seq;
 }
 
 await pg.end({ timeout: 2 });
@@ -70,5 +47,5 @@ await pg.end({ timeout: 2 });
 if (!ok) {
   process.exit(1);
 }
-console.log(`Verified ${rows.length} events for workspace ${workspaceId}`);
+console.log(`Verified ${rows.length} domain_events for tenant ${tenantId}`);
 process.exit(0);

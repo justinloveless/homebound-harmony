@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		964A0F452FAAEBB100342CD0 /* RouteCareArgon2 in Frameworks */ = {isa = PBXBuildFile; productRef = BD2010052FAA977300342CD0 /* RouteCareArgon2 */; };
 		A1B2C3D42FAA111100111111 /* RouteCareWidgets.appex in CopyFiles */ = {isa = PBXBuildFile; fileRef = A1B2C3D32FAA111100111111 /* RouteCareWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -88,7 +87,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				964A0F452FAAEBB100342CD0 /* RouteCareArgon2 in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,7 +160,6 @@
 			);
 			name = RouteCare;
 			packageProductDependencies = (
-				BD2010052FAA977300342CD0 /* RouteCareArgon2 */,
 			);
 			productName = RouteCare;
 			productReference = 964A0CFA2FAA976C00342CD0 /* RouteCare.app */;
@@ -272,7 +269,6 @@
 			mainGroup = 964A0CF12FAA976C00342CD0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				BD2010062FAA977300342CD0 /* XCLocalSwiftPackageReference "../SupportPackages/RouteCareArgon2" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 964A0CFB2FAA976C00342CD0 /* Products */;
@@ -753,20 +749,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		BD2010062FAA977300342CD0 /* XCLocalSwiftPackageReference "../SupportPackages/RouteCareArgon2" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../SupportPackages/RouteCareArgon2;
-		};
-/* End XCLocalSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		BD2010052FAA977300342CD0 /* RouteCareArgon2 */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = BD2010062FAA977300342CD0 /* XCLocalSwiftPackageReference "../SupportPackages/RouteCareArgon2" */;
-			productName = RouteCareArgon2;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 964A0CF22FAA976C00342CD0 /* Project object */;
 }

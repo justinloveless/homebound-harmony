@@ -9,6 +9,7 @@ export type AuditAction =
   | 'admin_data_events_list' | 'admin_data_event_detail'
   | 'admin_sessions_revoke'
   | 'member_invite' | 'member_revoke' | 'member_role_change'
+  | 'tenant_settings_update'
   | 'wk_rotate_start' | 'wk_rotate_complete';
 
 export async function logEvent(params: {

@@ -12,15 +12,11 @@ let package = Package(
     products: [
         .library(name: "HomeboundHarmony", targets: ["HomeboundHarmony"]),
     ],
-    dependencies: [
-        .package(path: "SupportPackages/RouteCareArgon2"),
-    ],
+    dependencies: [],
     targets: [
         .target(
             name: "HomeboundHarmony",
-            dependencies: [
-                .product(name: "RouteCareArgon2", package: "routecareargon2"),
-            ],
+            dependencies: [],
             path: "Sources/HomeboundHarmony"
         ),
     ]
