@@ -87,7 +87,7 @@ export async function computeDomainEventPayloadDiff(params: {
     return {
       entries: [],
       replaySkipped: true,
-      replaySkipReason: `More than ${MAX_PRIOR_EVENTS} prior events for this tenant; automatic diff is disabled. Use raw payload or export events.`,
+      replaySkipReason: `More than ${MAX_PRIOR_EVENTS} prior events for this tenant; automatic field-by-field diff is disabled.`,
     };
   }
 
@@ -113,7 +113,7 @@ export async function computeDomainEventPayloadDiff(params: {
           path: 'workspace',
           kind: 'change',
           before: '(prior workspace from replay — not shown in full)',
-          after: '(imported workspace — see raw payload)',
+          after: '(imported workspace — details hidden)',
         },
       ],
       replayEventCount: priorRows.length,

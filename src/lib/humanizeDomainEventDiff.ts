@@ -38,6 +38,10 @@ export function humanizeEventKind(kind: string): string {
 }
 
 const FIELD_LABELS: Record<string, string> = {
+  lat: 'Latitude',
+  lon: 'Longitude',
+  start: 'Start',
+  end: 'End',
   name: 'Name',
   address: 'Address',
   coords: 'Location on map (GPS)',
@@ -82,6 +86,107 @@ const FIELD_LABELS: Record<string, string> = {
 
 const MAX_VAL = 160;
 
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function isCompositeValue(v: unknown): boolean {
+  return Array.isArray(v) || isPlainRecord(v);
+}
+
+function appendPath(basePath: string, segment: string): string {
+  if (!basePath || basePath === '.') return segment;
+  if (segment.startsWith('[')) return `${basePath}${segment}`;
+  return `${basePath}.${segment}`;
+}
+
+function looksLikeSerializedJson(text: string): boolean {
+  const first = text[0];
+  if (first !== '{' && first !== '[') return false;
+
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return text.includes('chars JSON') || text.includes('longer data hidden');
+  }
+}
+
+function flattenCompositeValue(value: unknown, basePath: string, kind: DiffKind): PayloadDiffEntry[] {
+  if (!isCompositeValue(value)) {
+    return kind === 'remove'
+      ? [{ path: basePath || '.', kind, before: value }]
+      : [{ path: basePath || '.', kind, after: value }];
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return kind === 'remove'
+        ? [{ path: basePath || '.', kind, before: 'empty list' }]
+        : [{ path: basePath || '.', kind, after: 'empty list' }];
+    }
+    return value.flatMap((item, index) => flattenCompositeValue(item, appendPath(basePath, `[${index}]`), kind));
+  }
+
+  const keys = Object.keys(value);
+  if (keys.length === 0) {
+    return kind === 'remove'
+      ? [{ path: basePath || '.', kind, before: 'no fields' }]
+      : [{ path: basePath || '.', kind, after: 'no fields' }];
+  }
+
+  return keys.flatMap((key) => flattenCompositeValue(value[key], appendPath(basePath, key), kind));
+}
+
+function expandCompositeChange(entry: PayloadDiffEntry): PayloadDiffEntry[] {
+  const beforeIsComposite = isCompositeValue(entry.before);
+  const afterIsComposite = isCompositeValue(entry.after);
+
+  if (!beforeIsComposite && !afterIsComposite) return [entry];
+
+  if ((entry.before == null || entry.before === undefined) && afterIsComposite) {
+    return flattenCompositeValue(entry.after, entry.path, 'add');
+  }
+
+  if (beforeIsComposite && (entry.after == null || entry.after === undefined)) {
+    return flattenCompositeValue(entry.before, entry.path, 'remove');
+  }
+
+  if (beforeIsComposite && afterIsComposite) {
+    const before = Array.isArray(entry.before)
+      ? Object.fromEntries(entry.before.map((value, index) => [`[${index}]`, value]))
+      : entry.before;
+    const after = Array.isArray(entry.after)
+      ? Object.fromEntries(entry.after.map((value, index) => [`[${index}]`, value]))
+      : entry.after;
+    const beforeRecord = before as Record<string, unknown>;
+    const afterRecord = after as Record<string, unknown>;
+    const keys = new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)]);
+    const expanded: PayloadDiffEntry[] = [];
+
+    for (const key of keys) {
+      const path = key.startsWith('[') ? appendPath(entry.path, key) : appendPath(entry.path, key);
+      if (!(key in beforeRecord)) {
+        expanded.push(...flattenCompositeValue(afterRecord[key], path, 'add'));
+      } else if (!(key in afterRecord)) {
+        expanded.push(...flattenCompositeValue(beforeRecord[key], path, 'remove'));
+      } else if (isCompositeValue(beforeRecord[key]) || isCompositeValue(afterRecord[key])) {
+        expanded.push(...expandCompositeChange({ path, kind: 'change', before: beforeRecord[key], after: afterRecord[key] }));
+      } else if (beforeRecord[key] !== afterRecord[key]) {
+        expanded.push({ path, kind: 'change', before: beforeRecord[key], after: afterRecord[key] });
+      }
+    }
+
+    return expanded.length ? expanded : [entry];
+  }
+
+  return [entry];
+}
+
+export function expandPayloadDiffEntries(entries: PayloadDiffEntry[]): PayloadDiffEntry[] {
+  return entries.flatMap(expandCompositeChange);
+}
+
 export function formatDisplayValue(v: unknown): string {
   if (v === undefined) return '';
   if (v === null) return 'none';
@@ -90,16 +195,18 @@ export function formatDisplayValue(v: unknown): string {
   if (typeof v === 'string') {
     const t = v.trim();
     if (!t.length) return '(empty)';
+    if (looksLikeSerializedJson(t)) return '(structured data hidden)';
     if (t.length <= MAX_VAL) return t;
     return `${t.slice(0, MAX_VAL)}…`;
   }
-  try {
-    const s = JSON.stringify(v);
-    if (s.length <= MAX_VAL) return s;
-    return `${s.slice(0, MAX_VAL)}… (longer data hidden)`;
-  } catch {
-    return '(could not display)';
+  if (Array.isArray(v)) {
+    return v.length === 1 ? '1 item' : `${v.length} items`;
   }
+  if (isPlainRecord(v)) {
+    const keys = Object.keys(v);
+    return keys.length === 1 ? '1 field' : `${keys.length} fields`;
+  }
+  return '(could not display)';
 }
 
 function lastPathSegment(path: string): string {

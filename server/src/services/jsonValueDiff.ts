@@ -29,6 +29,16 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
 }
 
+function isCompositeValue(v: unknown): boolean {
+  return Array.isArray(v) || isPlainObject(v);
+}
+
+function emptyCompositeLike(v: unknown): unknown {
+  if (Array.isArray(v)) return [];
+  if (isPlainObject(v)) return {};
+  return undefined;
+}
+
 function hasIdArray(arr: unknown[]): arr is { id: string }[] {
   return arr.length === 0 || (typeof arr[0] === 'object' && arr[0] !== null && 'id' in (arr[0] as object));
 }
@@ -37,10 +47,19 @@ export function diffJsonValues(before: unknown, after: unknown, basePath = ''): 
   if (isDeepStrictEqual(before, after)) return [];
 
   if (before === undefined && after !== undefined) {
+    if (isCompositeValue(after)) return diffJsonValues(emptyCompositeLike(after), after, basePath);
     return [{ path: basePath || '.', kind: 'add', after: preview(after) }];
   }
   if (before !== undefined && after === undefined) {
+    if (isCompositeValue(before)) return diffJsonValues(before, emptyCompositeLike(before), basePath);
     return [{ path: basePath || '.', kind: 'remove', before: preview(before) }];
+  }
+
+  if (before === null && isCompositeValue(after)) {
+    return diffJsonValues(emptyCompositeLike(after), after, basePath);
+  }
+  if (isCompositeValue(before) && after === null) {
+    return diffJsonValues(before, emptyCompositeLike(before), basePath);
   }
 
   if (before === null || after === null || typeof before !== typeof after) {

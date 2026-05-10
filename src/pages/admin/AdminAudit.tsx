@@ -19,6 +19,7 @@ import { ChevronDown } from 'lucide-react';
 import {
   changeVerb,
   diffEntryToSentence,
+  expandPayloadDiffEntries,
   formatDisplayValue,
   humanizeEventKind,
   type PayloadDiffEntry,
@@ -139,6 +140,8 @@ export default function AdminAuditPage() {
       toast.error('Could not load event');
     }
   };
+
+  const detailDiffEntries = expandPayloadDiffEntries(detail?.payloadDiff?.entries ?? []);
 
   return (
     <AdminGate>
@@ -389,18 +392,17 @@ export default function AdminAuditPage() {
                     </div>
                     {detail.payloadDiff?.truncated && (
                       <p className="text-xs text-amber-800 dark:text-amber-300 border border-amber-500/30 rounded-md p-2">
-                        Only the first 400 changes are listed here. Open the Technical details section below if you need
-                        the full picture.
+                        Only the first 400 changed fields are listed here.
                       </p>
                     )}
                     <ul className="space-y-2 overflow-auto flex-1 min-h-[10rem] max-h-[42vh] pr-1">
-                      {(detail.payloadDiff?.entries ?? []).length === 0 ? (
+                      {detailDiffEntries.length === 0 ? (
                         <li className="text-muted-foreground text-sm border rounded-md p-3">
                           Nothing in the schedule or roster looks different after this action. It may only carry
                           extra technical data (for example a visit id).
                         </li>
                       ) : (
-                        (detail.payloadDiff?.entries ?? []).map((row, i) => (
+                        detailDiffEntries.map((row, i) => (
                           <li
                             key={`${row.path}-${i}`}
                             className={`rounded-md border p-3 text-sm leading-snug ${
@@ -433,11 +435,12 @@ export default function AdminAuditPage() {
                     <Collapsible>
                       <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground py-1">
                         <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-                        Technical details (for support staff)
+                        Field details (for support staff)
                       </CollapsibleTrigger>
                       <CollapsibleContent className="space-y-2 mt-1">
                         <p className="text-[11px] text-muted-foreground">
-                          Internal field paths and exact values. You can copy from here if you are filing a ticket.
+                          Internal field names and readable before/after values. You can copy from here if you are
+                          filing a ticket.
                         </p>
                         <div className="overflow-auto rounded-md border max-h-[32vh]">
                           <table className="w-full text-xs">
@@ -450,14 +453,14 @@ export default function AdminAuditPage() {
                               </tr>
                             </thead>
                             <tbody>
-                              {(detail.payloadDiff?.entries ?? []).length === 0 ? (
+                              {detailDiffEntries.length === 0 ? (
                                 <tr>
                                   <td colSpan={4} className="p-2 text-muted-foreground">
                                     No rows.
                                   </td>
                                 </tr>
                               ) : (
-                                (detail.payloadDiff?.entries ?? []).map((row, i) => (
+                                detailDiffEntries.map((row, i) => (
                                   <tr key={`t-${row.path}-${i}`} className="border-b align-top">
                                     <td className="p-2 whitespace-nowrap">{row.kind}</td>
                                     <td className="p-2 font-mono break-all">{row.path || '.'}</td>
@@ -473,21 +476,6 @@ export default function AdminAuditPage() {
                     </Collapsible>
                   </>
                 )}
-
-                <Collapsible>
-                  <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground py-1">
-                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-                    Full technical record (JSON)
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <pre className="text-xs overflow-auto max-h-[35vh] bg-muted p-3 rounded-md mt-1">
-                      {(() => {
-                        const { payloadDiff: _pd, ...rest } = detail;
-                        return JSON.stringify(rest, null, 2);
-                      })()}
-                    </pre>
-                  </CollapsibleContent>
-                </Collapsible>
               </div>
             )}
           </DialogContent>
