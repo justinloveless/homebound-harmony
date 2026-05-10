@@ -16,6 +16,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { AdminGate } from '@/components/AdminGate';
 import { toast } from 'sonner';
 import { ChevronDown } from 'lucide-react';
+import {
+  changeVerb,
+  diffEntryToSentence,
+  formatDisplayValue,
+  humanizeEventKind,
+  type PayloadDiffEntry,
+} from '@/lib/humanizeDomainEventDiff';
 
 interface AuditRow {
   id: string;
@@ -44,13 +51,6 @@ interface DomainEventRow {
   hasGps: boolean;
 }
 
-interface PayloadDiffEntry {
-  path: string;
-  kind: 'add' | 'remove' | 'change';
-  before?: unknown;
-  after?: unknown;
-}
-
 interface PayloadDiffBlock {
   entries: PayloadDiffEntry[];
   replayEventCount?: number;
@@ -74,17 +74,6 @@ interface DomainEventDetail {
 }
 
 const PAGE_OPTIONS = [25, 50, 100, 200] as const;
-
-function formatDiffCell(v: unknown): string {
-  if (v === undefined) return '—';
-  if (v === null) return 'null';
-  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
 
 export default function AdminAuditPage() {
   const [userId, setUserId] = useState('');
@@ -333,7 +322,10 @@ export default function AdminAuditPage() {
                       <td className="p-2 whitespace-nowrap text-xs">
                         {new Date(r.serverReceivedAt).toLocaleString()}
                       </td>
-                      <td className="p-2 font-mono text-xs break-all">{r.kind}</td>
+                      <td className="p-2">
+                        <span className="block">{humanizeEventKind(r.kind)}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{r.kind}</span>
+                      </td>
                       <td className="p-2">{r.summary ?? r.kind}</td>
                       <td className="p-2 font-mono text-xs break-all" title={r.tenantId}>
                         {r.tenantId.slice(0, 8)}…
@@ -355,23 +347,24 @@ export default function AdminAuditPage() {
         <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
           <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col gap-3">
             <DialogHeader>
-              <DialogTitle>Domain event</DialogTitle>
+              <DialogTitle>Activity detail</DialogTitle>
             </DialogHeader>
             {detail && (
               <div className="space-y-3 min-h-0 flex flex-col text-sm">
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-                  <dt className="text-muted-foreground">Kind</dt>
-                  <dd className="font-mono">{detail.kind}</dd>
-                  <dt className="text-muted-foreground">Seq</dt>
-                  <dd>{String(detail.seq)}</dd>
-                  <dt className="text-muted-foreground">Tenant</dt>
-                  <dd className="font-mono break-all">{detail.tenantId}</dd>
-                  <dt className="text-muted-foreground">Author</dt>
-                  <dd>{detail.authorEmail ?? detail.authorUserId}</dd>
-                  <dt className="text-muted-foreground">Received</dt>
+                  <dt className="text-muted-foreground">What happened</dt>
+                  <dd>
+                    <span className="font-medium text-foreground">{humanizeEventKind(detail.kind)}</span>
+                    <span className="text-muted-foreground font-mono text-[10px] ml-2">({detail.kind})</span>
+                  </dd>
+                  <dt className="text-muted-foreground">When (server)</dt>
                   <dd>{new Date(detail.serverReceivedAt).toLocaleString()}</dd>
-                  <dt className="text-muted-foreground">Client claimed</dt>
+                  <dt className="text-muted-foreground">Who</dt>
+                  <dd>{detail.authorEmail ?? detail.authorUserId}</dd>
+                  <dt className="text-muted-foreground">When (device)</dt>
                   <dd>{new Date(detail.clientClaimedAt).toLocaleString()}</dd>
+                  <dt className="text-muted-foreground">Order #</dt>
+                  <dd>{String(detail.seq)}</dd>
                 </dl>
 
                 {detail.payloadDiff?.replaySkipped ? (
@@ -380,70 +373,111 @@ export default function AdminAuditPage() {
                   </p>
                 ) : (
                   <>
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="text-sm font-medium">Changes vs prior replayed state</h3>
-                      {detail.payloadDiff?.replayEventCount != null && (
-                        <span className="text-xs text-muted-foreground">
-                          {detail.payloadDiff.replayEventCount} prior event
-                          {detail.payloadDiff.replayEventCount === 1 ? '' : 's'} replayed
-                        </span>
-                      )}
+                    <div>
+                      <h3 className="text-sm font-medium text-foreground">What changed</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Each line compares this action to how things looked right before it, using the history of
+                        earlier actions for this organization.
+                        {detail.payloadDiff?.replayEventCount != null && (
+                          <>
+                            {' '}
+                            ({detail.payloadDiff.replayEventCount} earlier action
+                            {detail.payloadDiff.replayEventCount === 1 ? '' : 's'} were replayed to figure that out.)
+                          </>
+                        )}
+                      </p>
                     </div>
                     {detail.payloadDiff?.truncated && (
-                      <p className="text-xs text-muted-foreground">
-                        Diff truncated to the first 400 changed fields. Open raw payload for the full snapshot.
+                      <p className="text-xs text-amber-800 dark:text-amber-300 border border-amber-500/30 rounded-md p-2">
+                        Only the first 400 changes are listed here. Open the Technical details section below if you need
+                        the full picture.
                       </p>
                     )}
-                    <div className="overflow-auto rounded-md border flex-1 min-h-[12rem] max-h-[45vh]">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b bg-muted/50 sticky top-0">
-                            <th className="text-left p-2 w-20">Change</th>
-                            <th className="text-left p-2 min-w-[8rem]">Path</th>
-                            <th className="text-left p-2">Before</th>
-                            <th className="text-left p-2">After</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(detail.payloadDiff?.entries ?? []).length === 0 ? (
-                            <tr>
-                              <td colSpan={4} className="p-3 text-muted-foreground">
-                                No field-level changes detected (event may be a no-op on workspace state, or only
-                                carries metadata).
-                              </td>
-                            </tr>
-                          ) : (
-                            (detail.payloadDiff?.entries ?? []).map((row, i) => (
-                              <tr key={`${row.path}-${i}`} className="border-b align-top">
-                                <td className="p-2 whitespace-nowrap">
-                                  <span
-                                    className={
-                                      row.kind === 'add'
-                                        ? 'text-green-700 dark:text-green-400'
-                                        : row.kind === 'remove'
-                                          ? 'text-red-700 dark:text-red-400'
-                                          : 'text-amber-800 dark:text-amber-300'
-                                    }
-                                  >
-                                    {row.kind}
-                                  </span>
-                                </td>
-                                <td className="p-2 font-mono break-all">{row.path || '.'}</td>
-                                <td className="p-2 break-words max-w-[14rem]">{formatDiffCell(row.before)}</td>
-                                <td className="p-2 break-words max-w-[14rem]">{formatDiffCell(row.after)}</td>
+                    <ul className="space-y-2 overflow-auto flex-1 min-h-[10rem] max-h-[42vh] pr-1">
+                      {(detail.payloadDiff?.entries ?? []).length === 0 ? (
+                        <li className="text-muted-foreground text-sm border rounded-md p-3">
+                          Nothing in the schedule or roster looks different after this action. It may only carry
+                          extra technical data (for example a visit id).
+                        </li>
+                      ) : (
+                        (detail.payloadDiff?.entries ?? []).map((row, i) => (
+                          <li
+                            key={`${row.path}-${i}`}
+                            className={`rounded-md border p-3 text-sm leading-snug ${
+                              row.kind === 'add'
+                                ? 'border-green-500/30 bg-green-500/5'
+                                : row.kind === 'remove'
+                                  ? 'border-red-500/30 bg-red-500/5'
+                                  : 'border-amber-500/25 bg-amber-500/5'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <span
+                                className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                                  row.kind === 'add'
+                                    ? 'bg-green-600/15 text-green-800 dark:text-green-300'
+                                    : row.kind === 'remove'
+                                      ? 'bg-red-600/15 text-red-800 dark:text-red-300'
+                                      : 'bg-amber-600/15 text-amber-900 dark:text-amber-200'
+                                }`}
+                              >
+                                {changeVerb(row.kind)}
+                              </span>
+                            </div>
+                            <p className="text-foreground">{diffEntryToSentence(row, detail.kind)}</p>
+                          </li>
+                        ))
+                      )}
+                    </ul>
+
+                    <Collapsible>
+                      <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground py-1">
+                        <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+                        Technical details (for support staff)
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="space-y-2 mt-1">
+                        <p className="text-[11px] text-muted-foreground">
+                          Internal field paths and exact values. You can copy from here if you are filing a ticket.
+                        </p>
+                        <div className="overflow-auto rounded-md border max-h-[32vh]">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="border-b bg-muted/50 sticky top-0">
+                                <th className="text-left p-2 w-20">Type</th>
+                                <th className="text-left p-2 min-w-[6rem]">Path</th>
+                                <th className="text-left p-2">Before</th>
+                                <th className="text-left p-2">After</th>
                               </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
+                            </thead>
+                            <tbody>
+                              {(detail.payloadDiff?.entries ?? []).length === 0 ? (
+                                <tr>
+                                  <td colSpan={4} className="p-2 text-muted-foreground">
+                                    No rows.
+                                  </td>
+                                </tr>
+                              ) : (
+                                (detail.payloadDiff?.entries ?? []).map((row, i) => (
+                                  <tr key={`t-${row.path}-${i}`} className="border-b align-top">
+                                    <td className="p-2 whitespace-nowrap">{row.kind}</td>
+                                    <td className="p-2 font-mono break-all">{row.path || '.'}</td>
+                                    <td className="p-2 break-words max-w-[12rem]">{formatDisplayValue(row.before)}</td>
+                                    <td className="p-2 break-words max-w-[12rem]">{formatDisplayValue(row.after)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
                   </>
                 )}
 
                 <Collapsible>
                   <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground py-1">
                     <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-                    Raw payload (JSON)
+                    Full technical record (JSON)
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <pre className="text-xs overflow-auto max-h-[35vh] bg-muted p-3 rounded-md mt-1">
