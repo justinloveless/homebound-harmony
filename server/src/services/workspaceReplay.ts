@@ -85,9 +85,10 @@ export function applyDomainEventRow(state: Workspace, row: { kind: string; paylo
     }
     case 'client_updated': {
       const pl = ev.payload as Client;
+      const existing = state.clients.some((c) => c.id === pl.id);
       const next = {
         ...state,
-        clients: state.clients.map((c) => (c.id === pl.id ? pl : c)),
+        clients: existing ? state.clients.map((c) => (c.id === pl.id ? pl : c)) : [...state.clients, pl],
       };
       next.travelTimes = recalcTravelTimes(next);
       return next;
