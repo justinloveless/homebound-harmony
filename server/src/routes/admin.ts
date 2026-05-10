@@ -5,6 +5,7 @@ import { and, asc, count, desc, eq, gt, ilike, inArray, isNull } from 'drizzle-o
 import { requireUser, requireAdmin } from '../auth/middleware';
 import { deleteAllSessionsForUser } from '../auth/session';
 import { logEvent } from '../services/audit';
+import { computeDomainEventPayloadDiff } from '../services/domainEventDiff';
 import { CLIENT_DATA_EVENT_KINDS, domainEventListSummary } from '../services/domainEventSummarySql';
 import { isMfaDisabledEmail } from '../auth/mfaBypass';
 
@@ -297,6 +298,14 @@ admin.get('/domain-events/:id', async (c) => {
     userAgent: getUa(c),
   });
 
+  const targetSeq = Number(r.seq);
+  const payloadDiff = await computeDomainEventPayloadDiff({
+    tenantId: r.tenantId,
+    targetSeq,
+    kind: r.kind,
+    payload: r.payload,
+  });
+
   return c.json({
     event: {
       id: r.id,
@@ -316,6 +325,7 @@ admin.get('/domain-events/:id', async (c) => {
       gpsCapturedAt: r.gpsCapturedAt?.toISOString() ?? null,
       gpsStaleSeconds: r.gpsStaleSeconds,
       hasIpHash: !!r.ipHash,
+      payloadDiff,
     },
   });
 });

@@ -12,8 +12,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { AdminGate } from '@/components/AdminGate';
 import { toast } from 'sonner';
+import { ChevronDown } from 'lucide-react';
 
 interface AuditRow {
   id: string;
@@ -42,6 +44,21 @@ interface DomainEventRow {
   hasGps: boolean;
 }
 
+interface PayloadDiffEntry {
+  path: string;
+  kind: 'add' | 'remove' | 'change';
+  before?: unknown;
+  after?: unknown;
+}
+
+interface PayloadDiffBlock {
+  entries: PayloadDiffEntry[];
+  replayEventCount?: number;
+  replaySkipped?: boolean;
+  replaySkipReason?: string;
+  truncated?: boolean;
+}
+
 interface DomainEventDetail {
   id: string;
   tenantId: string;
@@ -53,9 +70,21 @@ interface DomainEventDetail {
   isClinical: boolean;
   authorUserId: string;
   authorEmail: string | null;
+  payloadDiff?: PayloadDiffBlock;
 }
 
 const PAGE_OPTIONS = [25, 50, 100, 200] as const;
+
+function formatDiffCell(v: unknown): string {
+  if (v === undefined) return '—';
+  if (v === null) return 'null';
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
 
 export default function AdminAuditPage() {
   const [userId, setUserId] = useState('');
@@ -324,14 +353,108 @@ export default function AdminAuditPage() {
         </Card>
 
         <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col gap-3">
             <DialogHeader>
               <DialogTitle>Domain event</DialogTitle>
             </DialogHeader>
             {detail && (
-              <pre className="text-xs overflow-auto max-h-[60vh] bg-muted p-3 rounded-md">
-                {JSON.stringify(detail, null, 2)}
-              </pre>
+              <div className="space-y-3 min-h-0 flex flex-col text-sm">
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-muted-foreground">Kind</dt>
+                  <dd className="font-mono">{detail.kind}</dd>
+                  <dt className="text-muted-foreground">Seq</dt>
+                  <dd>{String(detail.seq)}</dd>
+                  <dt className="text-muted-foreground">Tenant</dt>
+                  <dd className="font-mono break-all">{detail.tenantId}</dd>
+                  <dt className="text-muted-foreground">Author</dt>
+                  <dd>{detail.authorEmail ?? detail.authorUserId}</dd>
+                  <dt className="text-muted-foreground">Received</dt>
+                  <dd>{new Date(detail.serverReceivedAt).toLocaleString()}</dd>
+                  <dt className="text-muted-foreground">Client claimed</dt>
+                  <dd>{new Date(detail.clientClaimedAt).toLocaleString()}</dd>
+                </dl>
+
+                {detail.payloadDiff?.replaySkipped ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400 border border-amber-500/40 rounded-md p-2">
+                    {detail.payloadDiff.replaySkipReason ?? 'Diff unavailable.'}
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-medium">Changes vs prior replayed state</h3>
+                      {detail.payloadDiff?.replayEventCount != null && (
+                        <span className="text-xs text-muted-foreground">
+                          {detail.payloadDiff.replayEventCount} prior event
+                          {detail.payloadDiff.replayEventCount === 1 ? '' : 's'} replayed
+                        </span>
+                      )}
+                    </div>
+                    {detail.payloadDiff?.truncated && (
+                      <p className="text-xs text-muted-foreground">
+                        Diff truncated to the first 400 changed fields. Open raw payload for the full snapshot.
+                      </p>
+                    )}
+                    <div className="overflow-auto rounded-md border flex-1 min-h-[12rem] max-h-[45vh]">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/50 sticky top-0">
+                            <th className="text-left p-2 w-20">Change</th>
+                            <th className="text-left p-2 min-w-[8rem]">Path</th>
+                            <th className="text-left p-2">Before</th>
+                            <th className="text-left p-2">After</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(detail.payloadDiff?.entries ?? []).length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="p-3 text-muted-foreground">
+                                No field-level changes detected (event may be a no-op on workspace state, or only
+                                carries metadata).
+                              </td>
+                            </tr>
+                          ) : (
+                            (detail.payloadDiff?.entries ?? []).map((row, i) => (
+                              <tr key={`${row.path}-${i}`} className="border-b align-top">
+                                <td className="p-2 whitespace-nowrap">
+                                  <span
+                                    className={
+                                      row.kind === 'add'
+                                        ? 'text-green-700 dark:text-green-400'
+                                        : row.kind === 'remove'
+                                          ? 'text-red-700 dark:text-red-400'
+                                          : 'text-amber-800 dark:text-amber-300'
+                                    }
+                                  >
+                                    {row.kind}
+                                  </span>
+                                </td>
+                                <td className="p-2 font-mono break-all">{row.path || '.'}</td>
+                                <td className="p-2 break-words max-w-[14rem]">{formatDiffCell(row.before)}</td>
+                                <td className="p-2 break-words max-w-[14rem]">{formatDiffCell(row.after)}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
+                <Collapsible>
+                  <CollapsibleTrigger className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground py-1">
+                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+                    Raw payload (JSON)
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <pre className="text-xs overflow-auto max-h-[35vh] bg-muted p-3 rounded-md mt-1">
+                      {(() => {
+                        const { payloadDiff: _pd, ...rest } = detail;
+                        return JSON.stringify(rest, null, 2);
+                      })()}
+                    </pre>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
             )}
           </DialogContent>
         </Dialog>
