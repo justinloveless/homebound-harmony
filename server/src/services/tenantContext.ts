@@ -11,7 +11,7 @@ export type ResolvedTenant = {
   role: TenantRole;
 };
 
-const APP_DOMAIN = process.env.APP_DOMAIN ?? 'routecare.lovelesslabs.net';
+export const APP_DOMAIN = process.env.APP_DOMAIN ?? 'routecare.lovelesslabs.net';
 
 function parseSubdomain(host: string, appDomain: string): string | null {
   const h = host.split(':')[0]?.toLowerCase() ?? '';
@@ -22,6 +22,38 @@ function parseSubdomain(host: string, appDomain: string): string | null {
     if (sub && !sub.includes('.')) return sub;
   }
   return null;
+}
+
+export type RegistrationHostResolution =
+  | { status: 'apex' }
+  | { status: 'unknown_slug'; slug: string }
+  | { status: 'ok'; tenantId: string; tenantSlug: string };
+
+/**
+ * For public registration: resolve tenant from Host subdomain only (no membership check).
+ */
+export async function resolveRegistrationTenantFromHost(c: {
+  req: { header: (n: string) => string | undefined };
+}): Promise<RegistrationHostResolution> {
+  const host = c.req.header('host') ?? '';
+  const fromSub = parseSubdomain(host, APP_DOMAIN);
+  if (fromSub) {
+    const rows = await db.select({ id: tenants.id, slug: tenants.slug }).from(tenants).where(eq(tenants.slug, fromSub)).limit(1);
+    if (!rows[0]) return { status: 'unknown_slug', slug: fromSub };
+    return { status: 'ok', tenantId: rows[0].id, tenantSlug: rows[0].slug };
+  }
+
+  const devSlug =
+    process.env.NODE_ENV !== 'production'
+      ? process.env.REGISTRATION_FALLBACK_TENANT_SLUG?.trim().toLowerCase()
+      : undefined;
+  if (devSlug) {
+    const rows = await db.select({ id: tenants.id, slug: tenants.slug }).from(tenants).where(eq(tenants.slug, devSlug)).limit(1);
+    if (!rows[0]) return { status: 'unknown_slug', slug: devSlug };
+    return { status: 'ok', tenantId: rows[0].id, tenantSlug: rows[0].slug };
+  }
+
+  return { status: 'apex' };
 }
 
 /** Resolve tenant from query `tenantId`, Host subdomain, `X-Tenant-Id` / `X-Tenant-Slug`, or first membership. */

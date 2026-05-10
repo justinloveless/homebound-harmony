@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { api, ApiError } from '@/lib/api';
+import { APP_DOMAIN, getBrowserRegistrationHost } from '@/lib/tenantHost';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,15 +14,13 @@ type Step = 'credentials' | 'totp' | 'done';
 export default function RegisterPage() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const regHost = getBrowserRegistrationHost();
   const [step, setStep] = useState<Step>('credentials');
   const [submitting, setSubmitting] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-
-  const [registrationToken, setRegistrationToken] = useState<string | null>(null);
-  const [mfaDisabled, setMfaDisabled] = useState(false);
 
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
@@ -47,9 +46,6 @@ export default function RegisterPage() {
         email: email.trim().toLowerCase(),
         password,
       });
-      setRegistrationToken(res.registrationToken);
-      setMfaDisabled(!!res.mfaDisabled);
-
       if (res.mfaDisabled) {
         await auth.login(email.trim().toLowerCase(), password);
         setStep('done');
@@ -96,9 +92,30 @@ export default function RegisterPage() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Create account</CardTitle>
+          {regHost.kind === 'tenant' && (
+            <p className="text-sm text-muted-foreground font-normal pt-1">
+              Joining workspace <span className="font-mono text-foreground">{regHost.slug}</span>
+            </p>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
-          {step === 'credentials' && (
+          {regHost.kind === 'apex' && (
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <p>
+                Registration is only available on your clinic&apos;s subdomain, for example{' '}
+                <span className="font-mono text-xs text-foreground">
+                  https://your-clinic.{APP_DOMAIN}/register
+                </span>
+                .
+              </p>
+              <p>Ask your RouteCare administrator to create the tenant and share the correct link.</p>
+              <Button variant="outline" className="w-full" asChild>
+                <Link to="/login">Back to sign in</Link>
+              </Button>
+            </div>
+          )}
+
+          {regHost.kind === 'tenant' && step === 'credentials' && (
             <form className="space-y-4" onSubmit={submitCredentials}>
               <div>
                 <Label htmlFor="email">Email</Label>
@@ -139,7 +156,7 @@ export default function RegisterPage() {
             </form>
           )}
 
-          {step === 'totp' && (
+          {regHost.kind === 'tenant' && step === 'totp' && (
             <form className="space-y-4" onSubmit={verifyTotp}>
               {qrCode && (
                 <div className="flex justify-center">
@@ -163,13 +180,17 @@ export default function RegisterPage() {
             </form>
           )}
 
-          {step === 'done' && <p className="text-sm text-muted-foreground">Redirecting…</p>}
+          {regHost.kind === 'tenant' && step === 'done' && (
+            <p className="text-sm text-muted-foreground">Redirecting…</p>
+          )}
 
-          <div className="text-sm text-muted-foreground">
-            <Link to="/login" className="underline">
-              Already have an account?
-            </Link>
-          </div>
+          {regHost.kind === 'tenant' && (
+            <div className="text-sm text-muted-foreground">
+              <Link to="/login" className="underline">
+                Already have an account?
+              </Link>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

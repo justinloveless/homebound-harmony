@@ -5,7 +5,7 @@ import { hashIp } from './ipHash';
 export type AuditAction =
   | 'login' | 'logout' | 'password_change' | 'recovery_used'
   | 'share_create' | 'share_revoke' | 'share_fetch' | 'totp_enroll'
-  | 'admin_sessions_revoke'
+  | 'admin_sessions_revoke' | 'admin_tenant_create' | 'admin_user_tenant_assign'
   | 'member_invite' | 'member_revoke' | 'member_role_change'
   | 'tenant_settings_update'
   | 'wk_rotate_start' | 'wk_rotate_complete';

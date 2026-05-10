@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { db } from '../db/client';
-import { auditEvents, domainEvents, tenantMembers, tenants, users } from '../db/schema';
+import { auditEvents, domainEvents, tenantMembers, tenants, users, workers, tenantDomainChain } from '../db/schema';
 import { and, asc, count, desc, eq, gt, ilike, inArray, isNull } from 'drizzle-orm';
 import { requireUser, requireAdmin } from '../auth/middleware';
 import { deleteAllSessionsForUser } from '../auth/session';
@@ -22,6 +22,151 @@ function getClientIp(c: { req: { header: (n: string) => string | undefined } }):
 function getUa(c: { req: { header: (n: string) => string | undefined } }): string | undefined {
   return c.req.header('user-agent');
 }
+
+function normalizeTenantSlug(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+function isValidTenantSlug(slug: string): boolean {
+  if (slug.length < 1 || slug.length > 48) return false;
+  return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(slug);
+}
+
+admin.get('/tenants', async (c) => {
+  const rows = await db
+    .select({
+      id: tenants.id,
+      slug: tenants.slug,
+      name: tenants.name,
+      createdAt: tenants.createdAt,
+    })
+    .from(tenants)
+    .orderBy(desc(tenants.createdAt));
+
+  return c.json({
+    tenants: rows.map((t) => ({
+      id: t.id,
+      slug: t.slug,
+      name: t.name,
+      createdAt: t.createdAt.toISOString(),
+    })),
+  });
+});
+
+admin.post('/tenants', async (c) => {
+  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
+  const body = await c.req.json().catch(() => null);
+  const rawSlug = typeof body?.slug === 'string' ? body.slug : '';
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  const slug = normalizeTenantSlug(rawSlug);
+
+  if (!name) return c.json({ error: 'Missing name' }, 400);
+  if (!isValidTenantSlug(slug)) {
+    return c.json(
+      { error: 'Invalid slug: use 1–48 chars, lowercase letters, digits, hyphens; no leading/trailing hyphen.' },
+      400,
+    );
+  }
+
+  const dup = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, slug)).limit(1);
+  if (dup[0]) return c.json({ error: 'Slug already in use' }, 409);
+
+  const [t] = await db.insert(tenants).values({ slug, name }).returning({
+    id: tenants.id,
+    slug: tenants.slug,
+    name: tenants.name,
+  });
+
+  await db.insert(tenantDomainChain).values({ tenantId: t.id, headSeq: 0 });
+
+  await logEvent({
+    action: 'admin_tenant_create',
+    userId: operatorId,
+    artifactId: `tenant:${t.id}`,
+    ip: getClientIp(c),
+    userAgent: getUa(c),
+  });
+
+  return c.json(
+    {
+      tenant: {
+        id: t.id,
+        slug: t.slug,
+        name: t.name,
+      },
+    },
+    201,
+  );
+});
+
+admin.post('/users/:id/tenant', async (c) => {
+  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
+  const targetUserId = c.req.param('id');
+  const body = await c.req.json().catch(() => null);
+  const tenantId = typeof body?.tenantId === 'string' ? body.tenantId.trim() : '';
+  const role = body?.role === 'admin' ? 'admin' : 'caregiver';
+
+  if (!tenantId) return c.json({ error: 'Missing tenantId' }, 400);
+
+  const urows = await db.select({ id: users.id }).from(users).where(eq(users.id, targetUserId)).limit(1);
+  if (!urows[0]) return c.json({ error: 'User not found' }, 404);
+
+  const trows = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId)).limit(1);
+  if (!trows[0]) return c.json({ error: 'Tenant not found' }, 404);
+
+  await db
+    .update(tenantMembers)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(tenantMembers.userId, targetUserId), isNull(tenantMembers.revokedAt)));
+
+  const existing = await db
+    .select()
+    .from(tenantMembers)
+    .where(and(eq(tenantMembers.tenantId, tenantId), eq(tenantMembers.userId, targetUserId)))
+    .limit(1);
+
+  if (existing[0]) {
+    await db
+      .update(tenantMembers)
+      .set({ role, revokedAt: null })
+      .where(and(eq(tenantMembers.tenantId, tenantId), eq(tenantMembers.userId, targetUserId)));
+  } else {
+    await db.insert(tenantMembers).values({ tenantId, userId: targetUserId, role });
+  }
+
+  const wk = await db
+    .select({ id: workers.id })
+    .from(workers)
+    .where(and(eq(workers.tenantId, tenantId), eq(workers.userId, targetUserId)))
+    .limit(1);
+  if (!wk[0]) {
+    await db.insert(workers).values({
+      tenantId,
+      userId: targetUserId,
+      name: '',
+      homeAddress: '',
+    });
+  }
+
+  const ch = await db
+    .select({ tenantId: tenantDomainChain.tenantId })
+    .from(tenantDomainChain)
+    .where(eq(tenantDomainChain.tenantId, tenantId))
+    .limit(1);
+  if (!ch[0]) {
+    await db.insert(tenantDomainChain).values({ tenantId, headSeq: 0 });
+  }
+
+  await logEvent({
+    action: 'admin_user_tenant_assign',
+    userId: operatorId,
+    artifactId: `${tenantId}:${targetUserId}:${role}`,
+    ip: getClientIp(c),
+    userAgent: getUa(c),
+  });
+
+  return c.json({ success: true, tenantId, role });
+});
 
 admin.get('/users', async (c) => {
   const q = c.req.query('q')?.trim();
