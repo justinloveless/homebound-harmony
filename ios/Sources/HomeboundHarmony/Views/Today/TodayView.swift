@@ -392,7 +392,7 @@ struct VisitCard: View {
         .sheet(isPresented: $showVisitNoteSheet) {
             NavigationStack {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Add a note for this visit. It is encrypted and stored in your audit log.")
+                    Text("Add a note for this visit. It is saved to your visit audit log.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     TextEditor(text: $visitNoteDraft)

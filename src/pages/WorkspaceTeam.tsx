@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
-import { wrapWorkspaceKeyForPeer } from '@/lib/crypto';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -18,46 +17,32 @@ interface MemberRow {
 
 export default function WorkspaceTeamPage() {
   const auth = useAuth();
-  const wk = auth.workspaceKey;
   const [members, setMembers] = useState<MemberRow[]>([]);
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [tenantId, setTenantId] = useState<string | null>(null);
   const [myRole, setMyRole] = useState<string>('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState('editor');
+  const [role, setRole] = useState<'admin' | 'caregiver'>('caregiver');
   const [busy, setBusy] = useState(false);
 
   const refresh = async () => {
-    const res = await api.get<{ workspaceId: string; role: string; members: MemberRow[] }>(
-      '/api/workspace/members',
-    );
-    setWorkspaceId(res.workspaceId);
-    setMyRole(res.role);
+    const res = await api.get<{ members: MemberRow[] }>('/api/tenant/members');
+    const tid = auth.me?.tenants.find((t) => t.id === auth.activeTenantId)?.id ?? auth.me?.tenants[0]?.id;
+    setTenantId(tid ?? null);
+    const mine = auth.me?.tenants.find((t) => t.id === auth.activeTenantId);
+    setMyRole(mine?.role ?? '');
     setMembers(res.members ?? []);
   };
 
   useEffect(() => {
     void refresh().catch(() => toast.error('Could not load team'));
-  }, []);
+  }, [auth.activeTenantId, auth.me]);
 
   const invite = async () => {
-    if (!wk) {
-      toast.error('Unlock workspace first');
-      return;
-    }
     setBusy(true);
     try {
-      const lookup = await api.get<{ id: string; masterPublicKey: string | null }>(
-        `/api/auth/lookup-user?email=${encodeURIComponent(email.trim().toLowerCase())}`,
-      );
-      if (!lookup.masterPublicKey) {
-        toast.error('That user must enroll a device key in Settings first');
-        return;
-      }
-      const wrappedWorkspaceKey = await wrapWorkspaceKeyForPeer(wk, lookup.masterPublicKey);
-      await api.post('/api/workspace/members', {
-        userId: lookup.id,
+      await api.post('/api/tenant/members', {
+        email: email.trim().toLowerCase(),
         role,
-        wrappedWorkspaceKey,
       });
       toast.success('Member invited');
       setEmail('');
@@ -70,9 +55,9 @@ export default function WorkspaceTeamPage() {
   };
 
   const remove = async (userId: string) => {
-    if (!confirm('Remove this member from the workspace?')) return;
+    if (!confirm('Remove this member from the tenant?')) return;
     try {
-      await api.del(`/api/workspace/members/${userId}`);
+      await api.del(`/api/tenant/members/${userId}`);
       toast.success('Member removed');
       await refresh();
     } catch {
@@ -80,24 +65,24 @@ export default function WorkspaceTeamPage() {
     }
   };
 
-  const canManage = myRole === 'owner' || myRole === 'admin';
+  const canManage = myRole === 'admin';
 
   return (
     <div className="space-y-6 max-w-2xl">
       <Card>
         <CardHeader>
-          <CardTitle>Workspace team</CardTitle>
+          <CardTitle>Team</CardTitle>
         </CardHeader>
         <CardContent className="text-sm text-muted-foreground space-y-1">
-          {workspaceId && (
+          {tenantId && (
             <p>
-              Workspace ID: <span className="font-mono text-xs">{workspaceId}</span>
+              Tenant ID: <span className="font-mono text-xs">{tenantId}</span>
             </p>
           )}
           <p>
             Your role: <strong className="text-foreground">{myRole || '…'}</strong>
           </p>
-          <p>Members: {members.filter(m => m.active).length}</p>
+          <p>Members: {members.filter((m) => m.active).length}</p>
         </CardContent>
       </Card>
 
@@ -109,24 +94,30 @@ export default function WorkspaceTeamPage() {
           <CardContent className="space-y-3">
             <div>
               <Label>Email</Label>
-              <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="colleague@example.com" />
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="colleague@example.com"
+              />
             </div>
             <div>
               <Label>Role</Label>
-              <Select value={role} onValueChange={setRole}>
+              <Select value={role} onValueChange={(v) => setRole(v as 'admin' | 'caregiver')}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="editor">editor</SelectItem>
-                  <SelectItem value="viewer">viewer</SelectItem>
-                  <SelectItem value="admin">admin</SelectItem>
+                  <SelectItem value="caregiver">Caregiver</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <Button disabled={busy || !email.trim()} onClick={() => void invite()}>
-              Send invite
+            <Button onClick={() => void invite()} disabled={busy || !email.trim()}>
+              {busy ? 'Sending…' : 'Invite'}
             </Button>
+            <p className="text-xs text-muted-foreground">
+              The person must already have registered an account with this email.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -135,22 +126,22 @@ export default function WorkspaceTeamPage() {
         <CardHeader>
           <CardTitle>Members</CardTitle>
         </CardHeader>
-        <CardContent>
-          <ul className="space-y-2 text-sm">
-            {members.map(m => (
-              <li key={m.userId} className="flex justify-between items-center gap-2">
-                <span>
-                  {m.email} — {m.role}
-                  {!m.active && <span className="text-destructive ml-2">revoked</span>}
-                </span>
-                {canManage && m.active && m.userId !== auth.me?.id && (
+        <CardContent className="space-y-2">
+          {members
+            .filter((m) => m.active)
+            .map((m) => (
+              <div key={m.userId} className="flex items-center justify-between gap-2 border-b pb-2">
+                <div>
+                  <div className="font-medium">{m.email}</div>
+                  <div className="text-xs text-muted-foreground">{m.role}</div>
+                </div>
+                {canManage && m.userId !== auth.me?.id && (
                   <Button variant="outline" size="sm" onClick={() => void remove(m.userId)}>
                     Remove
                   </Button>
                 )}
-              </li>
+              </div>
             ))}
-          </ul>
         </CardContent>
       </Card>
     </div>

@@ -67,7 +67,7 @@ services:
       # for the __Host-session cookie.
       NODE_ENV: ${NODE_ENV:-development}
       PORT: "3000"
-      PUBLIC_DIR: /app/public
+      APP_DOMAIN: ${APP_DOMAIN:-routecare.lovelesslabs.net}
       # SECURITY: replace these with cryptographically random values in .env
       # before exposing this service to anyone but yourself. The app validates
       # both at runtime (argon.ts / ipHash.ts) and refuses to operate without

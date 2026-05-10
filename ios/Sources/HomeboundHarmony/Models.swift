@@ -313,7 +313,9 @@ let defaultWorkspace = Workspace(
     ),
     clients: [],
     travelTimes: [:],
-    lastSchedule: nil
+    travelTimeErrors: nil,
+    lastSchedule: nil,
+    savedSchedules: nil
 )
 
 // MARK: - API request/response types
@@ -324,46 +326,29 @@ struct LoginRequest: Encodable {
     let code: String?
 }
 
-struct LoginResponse: Decodable {
-    let pdkSalt: String
+struct TenantMembership: Decodable, Equatable {
+    let id: String
+    let slug: String
+    let name: String?
+    let role: String
 }
 
 struct MeResponse: Decodable {
     let id: String
     let email: String
-    let pdkSalt: String
+    let tenants: [TenantMembership]
     let totpEnrolled: Bool
     let mfaDisabled: Bool?
     let isAdmin: Bool?
 }
 
-struct ServerBlob: Decodable {
-    let ciphertext: String
-    let iv: String
-    let wrappedWorkspaceKey: String
-    let wrappedWorkspaceKeyRecovery: String
-    let version: Int
-}
-
-/// GET /api/snapshot — includes `snapshotSeq` for event replay tail.
-struct ServerSnapshot: Decodable {
-    let workspaceId: String?
-    let keyEpoch: Int?
-    let ciphertext: String
-    let iv: String
-    let wrappedWorkspaceKey: String
-    let wrappedWorkspaceKeyRecovery: String
-    let version: Int
-    let snapshotSeq: Int
-}
-
-struct PutWorkspaceRequest: Encodable {
-    let ciphertext: String
-    let iv: String
-}
-
-struct PutWorkspaceResponse: Decodable {
-    let version: Int
+struct PostEventsResponse: Decodable {
+    struct Accepted: Decodable {
+        let clientEventId: String
+        let seq: Int
+        let serverReceivedAt: String
+    }
+    let accepted: [Accepted]
 }
 
 struct EmptyResponse: Decodable {}

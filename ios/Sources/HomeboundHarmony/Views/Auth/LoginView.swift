@@ -86,7 +86,7 @@ struct LoginView: View {
                         isLoading || !serverConfigured || email.isEmpty || password.isEmpty
                     )
 
-                    Text("Your data is end-to-end encrypted.\nThe server never sees your schedule.")
+                    Text("Your schedule and clients sync with your RouteCare workspace.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

@@ -1,20 +1,22 @@
 // Thin fetch wrapper. Always sends cookies, parses JSON, throws on non-2xx.
 
+import { queryClient } from '@/lib/queryClient';
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
 
-let activeWorkspaceId: string | null = null;
+let activeTenantId: string | null = null;
 
-export function setActiveWorkspaceId(id: string | null) {
-  activeWorkspaceId = id;
+export function setActiveTenantId(id: string | null) {
+  activeTenantId = id;
 }
 
-export function getActiveWorkspaceId(): string | null {
-  return activeWorkspaceId;
+export function getActiveTenantId(): string | null {
+  return activeTenantId;
 }
 
-function workspaceHeaders(): Record<string, string> {
-  if (!activeWorkspaceId) return {};
-  return { 'X-Workspace-Id': activeWorkspaceId };
+function tenantHeaders(): Record<string, string> {
+  if (!activeTenantId) return {};
+  return { 'X-Tenant-Id': activeTenantId };
 }
 
 export class ApiError extends Error {
@@ -39,7 +41,7 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
 
   const finalHeaders: Record<string, string> = {
     Accept: 'application/json',
-    ...workspaceHeaders(),
+    ...tenantHeaders(),
     ...(headers as Record<string, string> | undefined),
   };
 
@@ -58,20 +60,21 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
     body: finalBody,
   });
 
-  // Some endpoints (logout) return 204 — handle bodyless responses.
   const text = await res.text();
   let parsed: unknown = null;
   if (text) {
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
   }
 
   if (!res.ok) {
-    const msg = (parsed as any)?.error ?? `Request failed (${res.status})`;
+    const msg = (parsed as { error?: string })?.error ?? `Request failed (${res.status})`;
     const needsAppUpdate = res.status === 410;
     if (needsAppUpdate && typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('app:update-required', { detail: parsed }),
-      );
+      window.dispatchEvent(new CustomEvent('app:update-required', { detail: parsed }));
     }
     throw new ApiError(res.status, parsed, msg, needsAppUpdate);
   }
@@ -79,16 +82,24 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
 }
 
 api.get = <T>(path: string, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'GET' });
-api.post = <T>(path: string, body?: unknown, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'POST', body });
-api.put = <T>(path: string, body?: unknown, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'PUT', body });
-api.patch = <T>(path: string, body?: unknown, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'PATCH', body });
+api.post = <T>(path: string, body?: unknown, opts?: RequestOpts) =>
+  api<T>(path, { ...opts, method: 'POST', body });
+api.put = <T>(path: string, body?: unknown, opts?: RequestOpts) =>
+  api<T>(path, { ...opts, method: 'PUT', body });
+api.patch = <T>(path: string, body?: unknown, opts?: RequestOpts) =>
+  api<T>(path, { ...opts, method: 'PATCH', body });
 api.del = <T>(path: string, opts?: RequestOpts) => api<T>(path, { ...opts, method: 'DELETE' });
+
+/** Invalidate workspace-related caches after remote domain updates (SSE). */
+export function invalidateWorkspaceQueries(): void {
+  void queryClient.invalidateQueries({ queryKey: ['workspace'] });
+}
 
 export function eventSource(path: string): EventSource {
   let url = path;
-  if (activeWorkspaceId && path.startsWith('/api/events/stream')) {
+  if (activeTenantId && path.startsWith('/api/events/stream')) {
     const q = path.includes('?') ? '&' : '?';
-    url = `${path}${q}workspaceId=${encodeURIComponent(activeWorkspaceId)}`;
+    url = `${path}${q}tenantId=${encodeURIComponent(activeTenantId)}`;
   }
   return new EventSource(`${API_BASE}${url}`, { withCredentials: true });
 }

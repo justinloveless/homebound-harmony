@@ -12,7 +12,7 @@ export default function AdminUserDetailPage() {
     id: string;
     email: string;
     createdAt: string;
-    memberships: { workspaceId: string; role: string; createdAt: string; revokedAt: string | null }[];
+    memberships: { tenantId: string; role: string; createdAt: string; revokedAt: string | null }[];
   } | null>(null);
 
   useEffect(() => {
@@ -58,13 +58,13 @@ export default function AdminUserDetailPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Workspace memberships</CardTitle>
+                <CardTitle>Tenant memberships</CardTitle>
               </CardHeader>
               <CardContent>
                 <ul className="text-sm space-y-2">
-                  {data.memberships.map(m => (
-                    <li key={`${m.workspaceId}-${m.createdAt}`}>
-                      <span className="font-mono text-xs">{m.workspaceId}</span> — {m.role}
+                  {data.memberships.map((m) => (
+                    <li key={`${m.tenantId}-${m.createdAt}`}>
+                      <span className="font-mono text-xs">{m.tenantId}</span> — {m.role}
                       {m.revokedAt ? (
                         <span className="text-destructive ml-2">revoked {m.revokedAt}</span>
                       ) : (

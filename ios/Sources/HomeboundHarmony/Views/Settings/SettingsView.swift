@@ -99,13 +99,6 @@ struct SettingsView: View {
                         Text(appVersion)
                             .foregroundStyle(.secondary)
                     }
-                    HStack {
-                        Text("Encryption")
-                        Spacer()
-                        Text("AES-256-GCM · Argon2id")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
             .listStyle(.insetGrouped)
@@ -124,7 +117,7 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Your encrypted data stays on the server. You can sign back in any time.")
+                Text("Your data stays on your RouteCare server. You can sign back in any time.")
             }
         }
     }

@@ -2,7 +2,7 @@ import Foundation
 
 /// Must stay in lockstep with web `src/lib/version.ts` `APP_CLIENT_VERSION` and server `MIN_CLIENT_VERSION`.
 enum ClientVersion {
-    static let current = "2026.5.6"
+    static let current = "2026.5.10"
 
     /// Replace with the App Store product URL when the app is listed; search works before then.
     static let appStoreListingURL = URL(string: "https://apps.apple.com/search?term=RouteCare")!

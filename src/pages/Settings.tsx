@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
-import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,25 +10,19 @@ import { DAYS_OF_WEEK, DAY_LABELS, STRATEGY_LABELS, type DayOfWeek, type WorkerP
 import { AddressSearch } from '@/components/AddressSearch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { exportWorkspace, importWorkspace, downloadJson } from '@/lib/storage';
-import { api, getActiveWorkspaceId } from '@/lib/api';
-import {
-  derivePdk,
-  DEVICE_ECDH_STORAGE_KEY,
-  exportEcdhPrivatePkcs8,
-  exportEcdhPublicKeySpki,
-  generateEcdhDeviceKeyPair,
-  generatePdkSalt,
-  wrapKey,
-} from '@/lib/crypto';
+import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
 export default function SettingsPage() {
   const { workspace, updateWorker, replaceWorkspace } = useWorkspace();
-  const auth = useAuth();
   const [form, setForm] = useState<WorkerProfile>(workspace.worker);
 
-  const handleSave = () => {
-    updateWorker(form);
+  useEffect(() => {
+    setForm(workspace.worker);
+  }, [workspace.worker]);
+
+  const handleSave = async () => {
+    await updateWorker(form);
     toast.success('Profile saved');
   };
 
@@ -212,9 +205,7 @@ export default function SettingsPage() {
 
       <Separator />
 
-      <DeviceKeyCard />
-
-      <ChangePasswordCard pdkSalt={auth.me?.pdkSalt} workspaceKey={auth.workspaceKey} />
+      <ChangePasswordCard />
 
       <Card>
         <CardHeader>
@@ -222,8 +213,8 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Export your workspace as JSON for offline backup. Importing replaces your current encrypted workspace
-            with the file's contents (re-encrypted on this device before upload).
+            Export your workspace as JSON for offline backup. Importing merges data through the server API
+            (worker profile, clients, travel times, and schedules).
           </p>
           <div className="flex gap-3 flex-wrap">
             <Button variant="outline" onClick={handleCopyToClipboard}>
@@ -242,47 +233,7 @@ export default function SettingsPage() {
   );
 }
 
-function DeviceKeyCard() {
-  const [busy, setBusy] = useState(false);
-  const onEnroll = async () => {
-    setBusy(true);
-    try {
-      const pair = await generateEcdhDeviceKeyPair();
-      const pub = await exportEcdhPublicKeySpki(pair.publicKey);
-      const pkcs8 = await exportEcdhPrivatePkcs8(pair.privateKey);
-      localStorage.setItem(DEVICE_ECDH_STORAGE_KEY, pkcs8);
-      await api.patch('/api/auth/me/device-key', { masterPublicKey: pub });
-      toast.success('Device key enrolled on this browser');
-    } catch {
-      toast.error('Device key enrollment failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Workspace device key</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <p className="text-sm text-muted-foreground">
-          Generate a key pair so others can invite you to shared workspaces. The private key stays in this
-          browser&apos;s storage.
-        </p>
-        <Button type="button" variant="secondary" disabled={busy} onClick={() => void onEnroll()}>
-          {busy ? 'Working…' : 'Generate and register device key'}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-interface ChangePasswordProps {
-  pdkSalt?: string;
-  workspaceKey: CryptoKey | null;
-}
-
-function ChangePasswordCard({ pdkSalt, workspaceKey }: ChangePasswordProps) {
+function ChangePasswordCard() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -290,41 +241,28 @@ function ChangePasswordCard({ pdkSalt, workspaceKey }: ChangePasswordProps) {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pdkSalt || !workspaceKey) { toast.error('Workspace not unlocked'); return; }
-    if (newPassword.length < 8) { toast.error('New password must be at least 8 characters'); return; }
-    if (newPassword !== confirm) { toast.error('Passwords do not match'); return; }
+    if (newPassword.length < 8) {
+      toast.error('New password must be at least 8 characters');
+      return;
+    }
+    if (newPassword !== confirm) {
+      toast.error('Passwords do not match');
+      return;
+    }
 
     setSubmitting(true);
     try {
-      // Re-wrap WK under the new PDK locally, then send both wrapped envelopes
-      // alongside the current/new passwords. We also re-derive the recovery
-      // wrapping key against the new salt so the recovery envelope keeps
-      // working without the user re-typing their recovery key.
-      const newPdkSalt = generatePdkSalt();
-      const newPdk = await derivePdk(newPassword, newPdkSalt);
-      const newWrappedWorkspaceKey = await wrapKey(workspaceKey, newPdk);
-      // Recovery envelope is left untouched: the recovery key + old salt
-      // combination still unwraps WK because the WK itself didn't change.
-      // (The plan calls out that password change re-wraps WK, not the
-      // recovery envelope.)
-      const blob = await api.get<{ wrappedWorkspaceKeyRecovery: string }>('/api/snapshot');
-
-      const workspaceId = getActiveWorkspaceId();
       await api.post('/api/auth/password/change', {
         currentPassword,
         newPassword,
-        newPdkSalt,
-        newWrappedWorkspaceKey,
-        newWrappedWorkspaceKeyRecovery: blob.wrappedWorkspaceKeyRecovery,
-        ...(workspaceId ? { workspaceId } : {}),
       });
 
-      toast.success('Password updated. Sign in again next time you reload.');
+      toast.success('Password updated.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirm('');
-    } catch (err: any) {
-      toast.error(err?.message ?? 'Password change failed');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Password change failed');
     } finally {
       setSubmitting(false);
     }
@@ -333,21 +271,41 @@ function ChangePasswordCard({ pdkSalt, workspaceKey }: ChangePasswordProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><KeyRound className="w-5 h-5" /> Change password</CardTitle>
+        <CardTitle className="flex items-center gap-2">
+          <KeyRound className="w-5 h-5" /> Change password
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <form className="space-y-3" onSubmit={onSubmit}>
           <div>
             <Label htmlFor="cur">Current password</Label>
-            <Input id="cur" type="password" required value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} />
+            <Input
+              id="cur"
+              type="password"
+              required
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="np">New password</Label>
-            <Input id="np" type="password" required value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+            <Input
+              id="np"
+              type="password"
+              required
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="conf">Confirm new password</Label>
-            <Input id="conf" type="password" required value={confirm} onChange={e => setConfirm(e.target.value)} />
+            <Input
+              id="conf"
+              type="password"
+              required
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
           </div>
           <Button type="submit" disabled={submitting}>
             {submitting ? 'Updating…' : 'Update password'}

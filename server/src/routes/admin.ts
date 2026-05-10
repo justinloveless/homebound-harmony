@@ -1,17 +1,12 @@
 import { Hono } from 'hono';
 import { db } from '../db/client';
-import {
-  users,
-  workspaceSnapshots,
-  userEventChain,
-  auditEvents,
-  dataEvents,
-  workspaceMembers,
-} from '../db/schema';
-import { and, asc, count, desc, eq, gt, ilike, isNull, sql } from 'drizzle-orm';
+import { auditEvents, domainEvents, tenantMembers, tenants, users } from '../db/schema';
+import { and, asc, count, desc, eq, gt, ilike, inArray, isNull } from 'drizzle-orm';
 import { requireUser, requireAdmin } from '../auth/middleware';
 import { deleteAllSessionsForUser } from '../auth/session';
 import { logEvent } from '../services/audit';
+import { computeDomainEventPayloadDiff } from '../services/domainEventDiff';
+import { CLIENT_DATA_EVENT_KINDS, domainEventListSummary } from '../services/domainEventSummarySql';
 import { isMfaDisabledEmail } from '../auth/mfaBypass';
 
 const admin = new Hono();
@@ -28,9 +23,7 @@ function getUa(c: { req: { header: (n: string) => string | undefined } }): strin
   return c.req.header('user-agent');
 }
 
-// GET /api/admin/users?q=&limit=&offset=
 admin.get('/users', async (c) => {
-  const operatorId = (c as any).get('userId') as string;
   const q = c.req.query('q')?.trim();
   const limit = Math.min(100, Math.max(1, Number(c.req.query('limit') ?? '50')));
   const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
@@ -62,51 +55,32 @@ admin.get('/users', async (c) => {
 
   const out = [];
   for (const u of userRows) {
-    const snaps = await db
+    const memberships = await db
       .select({
-        workspaceId: workspaceSnapshots.workspaceId,
-        version: workspaceSnapshots.version,
-        snapshotSeq: workspaceSnapshots.snapshotSeq,
-        updatedAt: workspaceSnapshots.updatedAt,
-        keyEpoch: workspaceSnapshots.keyEpoch,
+        tenantId: tenants.id,
+        slug: tenants.slug,
+        name: tenants.name,
+        role: tenantMembers.role,
       })
-      .from(workspaceSnapshots)
-      .innerJoin(workspaceMembers, eq(workspaceSnapshots.workspaceId, workspaceMembers.workspaceId))
-      .where(and(eq(workspaceMembers.userId, u.id), isNull(workspaceMembers.revokedAt)));
+      .from(tenantMembers)
+      .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
+      .where(and(eq(tenantMembers.userId, u.id), isNull(tenantMembers.revokedAt)));
 
-    const chains = await db
-      .select({ workspaceId: userEventChain.workspaceId, headSeq: userEventChain.headSeq })
-      .from(userEventChain)
-      .innerJoin(workspaceMembers, eq(userEventChain.workspaceId, workspaceMembers.workspaceId))
-      .where(and(eq(workspaceMembers.userId, u.id), isNull(workspaceMembers.revokedAt)));
-
-    const headByWs = new Map(chains.map((r) => [r.workspaceId, r.headSeq]));
     out.push({
       ...u,
-      workspaces: snaps.map((s) => ({
-        workspaceId: s.workspaceId,
-        version: s.version,
-        snapshotSeq: s.snapshotSeq,
-        headSeq: headByWs.get(s.workspaceId) ?? 0,
-        updatedAt: s.updatedAt.toISOString(),
-        keyEpoch: s.keyEpoch,
+      tenants: memberships.map((m) => ({
+        tenantId: m.tenantId,
+        slug: m.slug,
+        name: m.name,
+        role: m.role,
       })),
     });
   }
 
-  await logEvent({
-    action: 'admin_users_list',
-    userId: operatorId,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
-
   return c.json({ users: out });
 });
 
-// GET /api/admin/users/:id
 admin.get('/users/:id', async (c) => {
-  const operatorId = (c as any).get('userId') as string;
   const id = c.req.param('id');
 
   const userRows = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -115,16 +89,8 @@ admin.get('/users/:id', async (c) => {
 
   const memberships = await db
     .select()
-    .from(workspaceMembers)
-    .where(eq(workspaceMembers.userId, id));
-
-  await logEvent({
-    action: 'admin_user_detail',
-    userId: operatorId,
-    artifactId: id,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
+    .from(tenantMembers)
+    .where(eq(tenantMembers.userId, id));
 
   return c.json({
     id: u.id,
@@ -132,7 +98,7 @@ admin.get('/users/:id', async (c) => {
     createdAt: u.createdAt.toISOString(),
     mfaDisabled: u.mfaDisabled || isMfaDisabledEmail(u.email),
     memberships: memberships.map((m) => ({
-      workspaceId: m.workspaceId,
+      tenantId: m.tenantId,
       role: m.role,
       createdAt: m.createdAt.toISOString(),
       revokedAt: m.revokedAt?.toISOString() ?? null,
@@ -140,9 +106,7 @@ admin.get('/users/:id', async (c) => {
   });
 });
 
-// GET /api/admin/audit?userId=&limit=&offset=
 admin.get('/audit', async (c) => {
-  const operatorId = (c as any).get('userId') as string;
   const filterUserId = c.req.query('userId');
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '50')));
   const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
@@ -176,13 +140,6 @@ admin.get('/audit', async (c) => {
         .offset(offset)
     : await base.orderBy(desc(auditEvents.occurredAt)).limit(limit).offset(offset);
 
-  await logEvent({
-    action: 'admin_audit_list',
-    userId: operatorId,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
-
   return c.json({
     total,
     limit,
@@ -200,58 +157,49 @@ admin.get('/audit', async (c) => {
   });
 });
 
-// GET /api/admin/data-events?workspaceId=&authorUserId=&limit=&offset=
-// Metadata only (no ciphertext) — cross-workspace event timeline for admins.
-admin.get('/data-events', async (c) => {
-  const operatorId = (c as any).get('userId') as string;
-  const workspaceId = c.req.query('workspaceId')?.trim();
+admin.get('/domain-events', async (c) => {
+  const tenantId = c.req.query('tenantId')?.trim();
   const authorUserId = c.req.query('authorUserId')?.trim();
+  const kindExact = c.req.query('kind')?.trim();
+  const clientDataOnlyRaw = c.req.query('clientDataOnly');
+  const clientDataOnly =
+    clientDataOnlyRaw === '1' || clientDataOnlyRaw?.toLowerCase() === 'true';
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '50')));
   const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
 
   const predicates = [];
-  if (workspaceId) predicates.push(eq(dataEvents.workspaceId, workspaceId));
-  if (authorUserId) predicates.push(eq(dataEvents.authorUserId, authorUserId));
+  if (tenantId) predicates.push(eq(domainEvents.tenantId, tenantId));
+  if (authorUserId) predicates.push(eq(domainEvents.authorUserId, authorUserId));
+  if (kindExact) predicates.push(eq(domainEvents.kind, kindExact));
+  if (clientDataOnly) predicates.push(inArray(domainEvents.kind, [...CLIENT_DATA_EVENT_KINDS]));
   const combined = predicates.length ? and(...predicates) : undefined;
 
-  const countBase = db.select({ total: count() }).from(dataEvents);
-  const [countRow] = combined
-    ? await countBase.where(combined)
-    : await countBase;
+  const countBase = db.select({ total: count() }).from(domainEvents);
+  const [countRow] = combined ? await countBase.where(combined) : await countBase;
   const total = Number(countRow?.total ?? 0);
 
   const q = db
     .select({
-      id: dataEvents.id,
-      workspaceId: dataEvents.workspaceId,
-      seq: dataEvents.seq,
-      clientEventId: dataEvents.clientEventId,
-      serverReceivedAt: dataEvents.serverReceivedAt,
-      clientClaimedAt: dataEvents.clientClaimedAt,
-      isClinical: dataEvents.isClinical,
-      authorUserId: dataEvents.authorUserId,
+      id: domainEvents.id,
+      tenantId: domainEvents.tenantId,
+      seq: domainEvents.seq,
+      clientEventId: domainEvents.clientEventId,
+      kind: domainEvents.kind,
+      summary: domainEventListSummary,
+      serverReceivedAt: domainEvents.serverReceivedAt,
+      clientClaimedAt: domainEvents.clientClaimedAt,
+      isClinical: domainEvents.isClinical,
+      authorUserId: domainEvents.authorUserId,
       authorEmail: users.email,
-      gpsLat: dataEvents.gpsLat,
-      gpsLon: dataEvents.gpsLon,
+      gpsLat: domainEvents.gpsLat,
+      gpsLon: domainEvents.gpsLon,
     })
-    .from(dataEvents)
-    .leftJoin(users, eq(dataEvents.authorUserId, users.id));
+    .from(domainEvents)
+    .leftJoin(users, eq(domainEvents.authorUserId, users.id));
 
   const rows = combined
-    ? await q
-        .where(combined)
-        .orderBy(desc(dataEvents.serverReceivedAt))
-        .limit(limit)
-        .offset(offset)
-    : await q.orderBy(desc(dataEvents.serverReceivedAt)).limit(limit).offset(offset);
-
-  await logEvent({
-    action: 'admin_data_events_list',
-    userId: operatorId,
-    artifactId: workspaceId ?? authorUserId ?? undefined,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
+    ? await q.where(combined).orderBy(desc(domainEvents.serverReceivedAt)).limit(limit).offset(offset)
+    : await q.orderBy(desc(domainEvents.serverReceivedAt)).limit(limit).offset(offset);
 
   return c.json({
     total,
@@ -259,8 +207,10 @@ admin.get('/data-events', async (c) => {
     offset,
     events: rows.map((r) => ({
       id: r.id,
-      workspaceId: r.workspaceId,
+      tenantId: r.tenantId,
       seq: r.seq,
+      kind: r.kind,
+      summary: r.summary,
       clientEventId: r.clientEventId,
       serverReceivedAt: r.serverReceivedAt.toISOString(),
       clientClaimedAt: r.clientClaimedAt.toISOString(),
@@ -272,63 +222,55 @@ admin.get('/data-events', async (c) => {
   });
 });
 
-// GET /api/admin/data-events/:id — metadata + ciphertext/iv (admin-only; decryption uses workspace key only on clients).
-admin.get('/data-events/:id', async (c) => {
-  const operatorId = (c as any).get('userId') as string;
+admin.get('/domain-events/:id', async (c) => {
   const id = c.req.param('id');
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (!uuidRe.test(id)) {
-    return c.json({ error: 'Invalid id' }, 400);
-  }
+  if (!uuidRe.test(id)) return c.json({ error: 'Invalid id' }, 400);
 
   const rows = await db
     .select({
-      id: dataEvents.id,
-      workspaceId: dataEvents.workspaceId,
-      seq: dataEvents.seq,
-      clientEventId: dataEvents.clientEventId,
-      prevHash: dataEvents.prevHash,
-      hash: dataEvents.hash,
-      serverReceivedAt: dataEvents.serverReceivedAt,
-      clientClaimedAt: dataEvents.clientClaimedAt,
-      isClinical: dataEvents.isClinical,
-      authorUserId: dataEvents.authorUserId,
+      id: domainEvents.id,
+      tenantId: domainEvents.tenantId,
+      seq: domainEvents.seq,
+      clientEventId: domainEvents.clientEventId,
+      kind: domainEvents.kind,
+      payload: domainEvents.payload,
+      serverReceivedAt: domainEvents.serverReceivedAt,
+      clientClaimedAt: domainEvents.clientClaimedAt,
+      isClinical: domainEvents.isClinical,
+      authorUserId: domainEvents.authorUserId,
       authorEmail: users.email,
-      gpsLat: dataEvents.gpsLat,
-      gpsLon: dataEvents.gpsLon,
-      gpsAccuracyM: dataEvents.gpsAccuracyM,
-      gpsCapturedAt: dataEvents.gpsCapturedAt,
-      gpsStaleSeconds: dataEvents.gpsStaleSeconds,
-      ipHash: dataEvents.ipHash,
-      ciphertext: dataEvents.ciphertext,
-      iv: dataEvents.iv,
-      ciphertextLen: sql<number>`char_length(${dataEvents.ciphertext})`,
-      ivLen: sql<number>`char_length(${dataEvents.iv})`,
+      gpsLat: domainEvents.gpsLat,
+      gpsLon: domainEvents.gpsLon,
+      gpsAccuracyM: domainEvents.gpsAccuracyM,
+      gpsCapturedAt: domainEvents.gpsCapturedAt,
+      gpsStaleSeconds: domainEvents.gpsStaleSeconds,
+      ipHash: domainEvents.ipHash,
     })
-    .from(dataEvents)
-    .leftJoin(users, eq(dataEvents.authorUserId, users.id))
-    .where(eq(dataEvents.id, id))
+    .from(domainEvents)
+    .leftJoin(users, eq(domainEvents.authorUserId, users.id))
+    .where(eq(domainEvents.id, id))
     .limit(1);
 
   const r = rows[0];
   if (!r) return c.json({ error: 'Not found' }, 404);
 
-  await logEvent({
-    action: 'admin_data_event_detail',
-    userId: operatorId,
-    artifactId: id,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
+  const targetSeq = Number(r.seq);
+  const payloadDiff = await computeDomainEventPayloadDiff({
+    tenantId: r.tenantId,
+    targetSeq,
+    kind: r.kind,
+    payload: r.payload,
   });
 
   return c.json({
     event: {
       id: r.id,
-      workspaceId: r.workspaceId,
+      tenantId: r.tenantId,
       seq: r.seq,
       clientEventId: r.clientEventId,
-      prevHash: r.prevHash,
-      hash: r.hash,
+      kind: r.kind,
+      payload: r.payload,
       serverReceivedAt: r.serverReceivedAt.toISOString(),
       clientClaimedAt: r.clientClaimedAt.toISOString(),
       isClinical: r.isClinical,
@@ -340,60 +282,48 @@ admin.get('/data-events/:id', async (c) => {
       gpsCapturedAt: r.gpsCapturedAt?.toISOString() ?? null,
       gpsStaleSeconds: r.gpsStaleSeconds,
       hasIpHash: !!r.ipHash,
-      ciphertextCharLength: Number(r.ciphertextLen),
-      ivCharLength: Number(r.ivLen),
-      ciphertext: r.ciphertext,
-      iv: r.iv,
+      payloadDiff,
     },
   });
 });
 
-// GET /api/admin/workspaces/:workspaceId/event-log?sinceSeq=&limit=
-admin.get('/workspaces/:workspaceId/event-log', async (c) => {
-  const operatorId = (c as any).get('userId') as string;
-  const workspaceId = c.req.param('workspaceId');
+admin.get('/tenants/:tenantId/event-log', async (c) => {
+  const tenantId = c.req.param('tenantId');
   const sinceSeq = Number(c.req.query('sinceSeq') ?? '0');
   const limit = Math.min(500, Math.max(1, Number(c.req.query('limit') ?? '100')));
 
   const rows = await db
     .select({
-      seq: dataEvents.seq,
-      clientEventId: dataEvents.clientEventId,
-      serverReceivedAt: dataEvents.serverReceivedAt,
-      isClinical: dataEvents.isClinical,
-      authorUserId: dataEvents.authorUserId,
-      gpsLat: dataEvents.gpsLat,
-      gpsLon: dataEvents.gpsLon,
+      seq: domainEvents.seq,
+      clientEventId: domainEvents.clientEventId,
+      kind: domainEvents.kind,
+      serverReceivedAt: domainEvents.serverReceivedAt,
+      isClinical: domainEvents.isClinical,
+      authorUserId: domainEvents.authorUserId,
+      gpsLat: domainEvents.gpsLat,
+      gpsLon: domainEvents.gpsLon,
     })
-    .from(dataEvents)
-    .where(and(eq(dataEvents.workspaceId, workspaceId), gt(dataEvents.seq, sinceSeq)))
-    .orderBy(asc(dataEvents.seq))
+    .from(domainEvents)
+    .where(and(eq(domainEvents.tenantId, tenantId), gt(domainEvents.seq, sinceSeq)))
+    .orderBy(asc(domainEvents.seq))
     .limit(limit);
 
-  await logEvent({
-    action: 'admin_event_log_list',
-    userId: operatorId,
-    artifactId: workspaceId,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
-
   return c.json({
-    events: rows.map((r) => ({
-      seq: r.seq,
-      clientEventId: r.clientEventId,
-      serverReceivedAt: r.serverReceivedAt.toISOString(),
-      isClinical: r.isClinical,
-      authorUserId: r.authorUserId,
-      gpsLat: r.gpsLat,
-      gpsLon: r.gpsLon,
+    events: rows.map((row) => ({
+      seq: row.seq,
+      clientEventId: row.clientEventId,
+      kind: row.kind,
+      serverReceivedAt: row.serverReceivedAt.toISOString(),
+      isClinical: row.isClinical,
+      authorUserId: row.authorUserId,
+      gpsLat: row.gpsLat,
+      gpsLon: row.gpsLon,
     })),
   });
 });
 
-// POST /api/admin/users/:id/revoke-sessions
 admin.post('/users/:id/revoke-sessions', async (c) => {
-  const operatorId = (c as any).get('userId') as string;
+  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const targetId = c.req.param('id');
 
   await deleteAllSessionsForUser(targetId);

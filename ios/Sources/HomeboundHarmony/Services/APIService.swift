@@ -38,14 +38,14 @@ enum APIError: LocalizedError, Equatable {
 
 final class APIService {
 
-    private static let activeWorkspaceIdKey = "RouteCare.activeWorkspaceId"
+    private static let activeTenantIdKey = "RouteCare.activeTenantId"
 
-    /// Sent as `X-Workspace-Id` on API calls after a successful snapshot (multi-workspace support).
-    static var activeWorkspaceId: String? {
-        get { UserDefaults.standard.string(forKey: activeWorkspaceIdKey) }
+    /// Sent as `X-Tenant-Id` on tenant-scoped API calls (matches web `api.ts`).
+    static var activeTenantId: String? {
+        get { UserDefaults.standard.string(forKey: activeTenantIdKey) }
         set {
-            if let v = newValue { UserDefaults.standard.set(v, forKey: activeWorkspaceIdKey) }
-            else { UserDefaults.standard.removeObject(forKey: activeWorkspaceIdKey) }
+            if let v = newValue { UserDefaults.standard.set(v, forKey: activeTenantIdKey) }
+            else { UserDefaults.standard.removeObject(forKey: activeTenantIdKey) }
         }
     }
 
@@ -87,9 +87,9 @@ final class APIService {
             req.httpBody = try encoder.encode(body)
         }
         var merged = headers
-        if let wid = Self.activeWorkspaceId, !wid.isEmpty {
-            if merged["X-Workspace-Id"] == nil {
-                merged["X-Workspace-Id"] = wid
+        if let tid = Self.activeTenantId, !tid.isEmpty {
+            if merged["X-Tenant-Id"] == nil {
+                merged["X-Tenant-Id"] = tid
             }
         }
         for (k, v) in merged { req.setValue(v, forHTTPHeaderField: k) }
@@ -213,14 +213,23 @@ final class APIService {
         try await request(method: "DELETE", path: path)
     }
 
+    /// Raw GET for JSON that includes untyped objects (e.g. domain event `payload`).
+    func getData(path: String, headers: [String: String] = [:]) async throws -> Data {
+        let (data, http) = try await sendRequest(method: "GET", path: path, headers: headers)
+        if !(200...299).contains(http.statusCode) {
+            throw mapFailure(data: data, http: http)
+        }
+        return data
+    }
+
     /// `GET /api/events/stream` — cookies flow through `URLSession.shared` like other API calls.
     static func eventsStreamRequest() throws -> URLRequest {
         let trimmed = UserDefaults.standard.string(forKey: "apiBaseURL")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var path = "/api/events/stream"
-        if let wid = activeWorkspaceId,
-           !wid.isEmpty,
-           let enc = wid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            path += "?workspaceId=\(enc)"
+        if let tid = activeTenantId,
+           !tid.isEmpty,
+           let enc = tid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            path += "?tenantId=\(enc)"
         }
         let url = try makeAbsoluteURL(baseURL: trimmed, path: path)
         var req = URLRequest(url: url)

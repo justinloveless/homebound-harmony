@@ -15,9 +15,6 @@ struct RootView: View {
             case .unauthenticated:
                 LoginView()
 
-            case .needsUnlock(let email):
-                UnlockView(email: email)
-
             case .authenticated:
                 MainTabView()
 

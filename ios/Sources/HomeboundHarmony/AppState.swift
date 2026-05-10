@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import CoreLocation
 import Observation
 import WidgetKit
@@ -9,7 +8,6 @@ import WidgetKit
 enum AuthState: Equatable {
     case checking
     case unauthenticated
-    case needsUnlock(email: String)
     case authenticated
     case appUpdateRequired(serverMin: String, message: String?)
 }
@@ -17,9 +15,7 @@ enum AuthState: Equatable {
 // MARK: - App-level errors
 
 enum AppError: LocalizedError {
-    case noWorkspaceKey
-    case noSalt
-    case wrongPassword
+    case noTenant
     case noWorkspace
     case noTodaySchedule
     case noCheckInTarget
@@ -28,10 +24,8 @@ enum AppError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .noWorkspaceKey: return "Workspace key not loaded. Please unlock."
-        case .noSalt:         return "Salt not available. Please log in again."
-        case .wrongPassword:  return "Incorrect password."
-        case .noWorkspace:    return "No workspace data found."
+        case .noTenant: return "No workspace tenant for this account. Complete setup on the web."
+        case .noWorkspace: return "No workspace data found."
         case .noTodaySchedule: return "No visits scheduled for today."
         case .noCheckInTarget: return "No visit is currently active or upcoming."
         case .cannotCheckInVisit: return "Unable to check in for this visit."
@@ -49,12 +43,11 @@ final class AppState {
     // Auth
     var authState: AuthState = .checking
     var userEmail: String?
-    var pdkSalt: String?
 
     // Workspace
     var workspace: Workspace?
-    var workspaceVersion: Int = 0
-    /// Server snapshot row `snapshot_seq` — tail events have `seq > snapshotSeq`.
+    var workspaceVersion: Int = 1
+    /// Last applied domain_events `seq` from the server (SSE + pull).
     var snapshotSeq: Int = 0
     var isSyncing = false
 
@@ -74,15 +67,12 @@ final class AppState {
 
     // Services
     let api = APIService()
-    let crypto = CryptoService()
     let notifications = NotificationService()
     let visitRuntimeStore = VisitRuntimeStore()
     private var checkInEngine: VisitCheckInEngine { VisitCheckInEngine(store: visitRuntimeStore) }
 
     private let keychain = KeychainService()
-    /// Sync is stateless; a fresh instance keeps `@Observable` macro compatibility (no `lazy` stored props).
-    private var sync: SyncService { SyncService(api: api, crypto: crypto) }
-    private var workspaceKey: SymmetricKey?
+    private var sync: SyncService { SyncService(api: api) }
 
     @ObservationIgnored private var eventStreamTask: Task<Void, Never>?
     @ObservationIgnored private var eventStreamDebounceTask: Task<Void, Never>?
@@ -96,6 +86,16 @@ final class AppState {
         authState = .appUpdateRequired(serverMin: serverMin, message: message)
     }
 
+    // MARK: - Tenant selection
+
+    private func resolveActiveTenant(for memberships: [TenantMembership]) {
+        if let saved = APIService.activeTenantId,
+           memberships.contains(where: { $0.id == saved }) {
+            return
+        }
+        APIService.activeTenantId = memberships[0].id
+    }
+
     // MARK: - Startup
 
     func checkAuthState() async {
@@ -107,29 +107,39 @@ final class AppState {
         do {
             let me: MeResponse = try await api.getAuthMeValidatingClientVersion()
             userEmail = me.email
-            pdkSalt   = me.pdkSalt ?? keychain.loadPdkSalt()
             keychain.saveUserEmail(me.email)
-            if let salt = pdkSalt { keychain.savePdkSalt(salt) }
+            keychain.deleteLegacyCryptoItems()
 
-            if let wkData = keychain.loadWorkspaceKey() {
-                workspaceKey = SymmetricKey(data: wkData)
-                try await pullWorkspace()
-                authState = .authenticated
-            } else {
-                authState = .needsUnlock(email: me.email)
+            guard !me.tenants.isEmpty else {
+                authState = .unauthenticated
+                errorMessage = AppError.noTenant.localizedDescription
+                return
             }
+            resolveActiveTenant(for: me.tenants)
+
+            try await pullWorkspace()
+            workspaceVersion = workspace?.version ?? 1
+            authState = .authenticated
+            await scheduleNotifications()
         } catch APIError.httpError(401, _) {
-            // Session expired or missing — clear cached key, show login.
-            keychain.deleteWorkspaceKey()
-            workspaceKey = nil
-            authState    = .unauthenticated
+            APIService.activeTenantId = nil
+            keychain.deleteLegacyCryptoItems()
+            authState = .unauthenticated
         } catch {
             if case APIError.requiresAppUpdate(let min, let msg) = error {
                 authState = .appUpdateRequired(serverMin: min, message: msg)
                 return
             }
+            if let se = error as? SyncError, se == .noWorkerProfile {
+                workspace = nil
+                snapshotSeq = 0
+                authState = .authenticated
+                errorMessage = se.localizedDescription
+                clearWidgetSnapshot()
+                return
+            }
             errorMessage = error.localizedDescription
-            authState    = .unauthenticated
+            authState = .unauthenticated
         }
     }
 
@@ -141,18 +151,18 @@ final class AppState {
         defer { reconcileEventStream() }
         errorMessage = nil
 
-        let loginResp: LoginResponse = try await api.post(
+        let _: EmptyResponse = try await api.post(
             path: "/api/auth/login",
             body: LoginRequest(email: email, password: password, code: totpCode)
         )
 
         userEmail = email.lowercased()
-        pdkSalt   = loginResp.pdkSalt
-        keychain.savePdkSalt(loginResp.pdkSalt)
         keychain.saveUserEmail(userEmail!)
+        keychain.deleteLegacyCryptoItems()
 
+        let me: MeResponse
         do {
-            _ = try await api.getAuthMeValidatingClientVersion()
+            me = try await api.getAuthMeValidatingClientVersion()
         } catch {
             if case APIError.requiresAppUpdate(let min, let msg) = error {
                 authState = .appUpdateRequired(serverMin: min, message: msg)
@@ -161,90 +171,13 @@ final class AppState {
             throw error
         }
 
-        // Derive password-derived key off the main thread.
-        let pdk = try await Task.detached(priority: .userInitiated) { [crypto, loginResp, password] in
-            try crypto.derivePDK(password: password, saltBase64: loginResp.pdkSalt)
-        }.value
-
-        let snap: ServerSnapshot = try await api.get(path: "/api/snapshot")
-        if let wid = snap.workspaceId { APIService.activeWorkspaceId = wid }
-        workspaceVersion = snap.version
-        snapshotSeq = snap.snapshotSeq
-        let wk: SymmetricKey
-        do {
-            wk = try crypto.unwrapWorkspaceKeyFromServer(envelope: snap.wrappedWorkspaceKey, wrappingKey: pdk)
-        } catch let ce as CryptoError {
-            if case .deviceKeyInviteNotSupportedOnIOS = ce { throw ce }
-            throw ce
+        guard !me.tenants.isEmpty else {
+            throw AppError.noTenant
         }
-        workspaceKey = wk
+        resolveActiveTenant(for: me.tenants)
 
-        wk.withUnsafeBytes { keychain.saveWorkspaceKey(Data($0)) }
-
-        let (ws, ver, seq, evs) = try await sync.pull(key: wk)
-        workspace = ws
-        workspaceVersion = ver
-        snapshotSeq = seq
-        mergeVisitRuntimeFromServerEvents(evs)
-        syncWidgetSnapshot()
-
-        authState = .authenticated
-        await scheduleNotifications()
-    }
-
-    // MARK: - Unlock (session still valid, WK not in memory)
-
-    func unlock(password: String) async throws {
-        isLoading = true
-        defer { isLoading = false }
-        defer { reconcileEventStream() }
-        errorMessage = nil
-
-        guard let salt = pdkSalt ?? keychain.loadPdkSalt() else {
-            throw AppError.noSalt
-        }
-
-        let pdk = try await Task.detached(priority: .userInitiated) { [crypto, salt, password] in
-            try crypto.derivePDK(password: password, saltBase64: salt)
-        }.value
-
-        do {
-            _ = try await api.getAuthMeValidatingClientVersion()
-        } catch {
-            if case APIError.requiresAppUpdate(let min, let msg) = error {
-                authState = .appUpdateRequired(serverMin: min, message: msg)
-                return
-            }
-            throw error
-        }
-
-        let snap: ServerSnapshot = try await api.get(path: "/api/snapshot")
-        if let wid = snap.workspaceId { APIService.activeWorkspaceId = wid }
-        workspaceVersion = snap.version
-        snapshotSeq = snap.snapshotSeq
-
-        do {
-            workspaceKey = try crypto.unwrapWorkspaceKeyFromServer(
-                envelope: snap.wrappedWorkspaceKey,
-                wrappingKey: pdk
-            )
-        } catch let ce as CryptoError {
-            if case .deviceKeyInviteNotSupportedOnIOS = ce { throw ce }
-            throw AppError.wrongPassword
-        } catch {
-            throw AppError.wrongPassword
-        }
-
-        workspaceKey!.withUnsafeBytes { keychain.saveWorkspaceKey(Data($0)) }
-
-        if let wk = workspaceKey {
-            let (ws, ver, seq, evs) = try await sync.pull(key: wk)
-            workspaceVersion = ver
-            snapshotSeq = seq
-            workspace = ws
-            mergeVisitRuntimeFromServerEvents(evs)
-            syncWidgetSnapshot()
-        }
+        try await pullWorkspace()
+        workspaceVersion = workspace?.version ?? 1
 
         authState = .authenticated
         await scheduleNotifications()
@@ -256,9 +189,8 @@ final class AppState {
         stopEventStream()
         EventOutboxStore.shared.clear()
         let _: EmptyResponse? = try? await api.post(path: "/api/auth/logout", body: Optional<String>.none)
-        APIService.activeWorkspaceId = nil
-        workspaceKey = nil
-        workspace    = nil
+        APIService.activeTenantId = nil
+        workspace = nil
         keychain.deleteAll()
         visitRuntimeStore.clear()
         clearWidgetSnapshot()
@@ -269,16 +201,12 @@ final class AppState {
     // MARK: - Workspace sync
 
     func refreshWorkspace() async {
-        guard let wk = workspaceKey, !isSyncing else { return }
+        guard authState == .authenticated, !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
         do {
-            let (ws, version, seq, evs) = try await sync.pull(key: wk)
-            workspaceVersion = version
-            snapshotSeq = seq
-            if let ws { workspace = ws }
-            mergeVisitRuntimeFromServerEvents(evs)
-            syncWidgetSnapshot()
+            try await pullWorkspace()
+            workspaceVersion = workspace?.version ?? 1
             await scheduleNotifications()
             await drainOutboxIfNeeded()
         } catch {
@@ -287,11 +215,9 @@ final class AppState {
     }
 
     private func pullWorkspace() async throws {
-        guard let wk = workspaceKey else { return }
-        let (ws, version, seq, evs) = try await sync.pull(key: wk)
-        workspaceVersion = version
+        let (ws, seq, evs) = try await sync.pullFullSync()
+        workspace = ws
         snapshotSeq = seq
-        if let ws { workspace = ws }
         mergeVisitRuntimeFromServerEvents(evs)
         syncWidgetSnapshot()
         await drainOutboxIfNeeded()
@@ -314,14 +240,8 @@ final class AppState {
     /// Retries any batches saved after a failed `POST /api/events` (offline / 5xx).
     func drainOutboxIfNeeded() async {
         do {
-            try await EventOutboxStore.shared.drainAllBatches { events, _ in
-                guard let wk = self.workspaceKey, let ws = self.workspace else { return }
-                self.workspaceVersion = try await self.sync.pushEvents(
-                    events: events,
-                    key: wk,
-                    workspace: ws,
-                    expectedVersion: self.workspaceVersion
-                )
+            try await EventOutboxStore.shared.drainAllBatches { events in
+                try await self.sync.pushEvents(events: events)
             }
             syncWidgetSnapshot()
         } catch {
@@ -356,21 +276,16 @@ final class AppState {
     }
 
     private func persistEvents(_ events: [[String: Any]]) async throws {
-        guard let wk = workspaceKey, let ws = workspace else {
-            throw AppError.noWorkspaceKey
+        guard workspace != nil else {
+            throw AppError.noWorkspace
         }
         await drainOutboxIfNeeded()
         do {
-            workspaceVersion = try await sync.pushEvents(
-                events: events,
-                key: wk,
-                workspace: ws,
-                expectedVersion: workspaceVersion
-            )
+            try await sync.pushEvents(events: events)
             syncWidgetSnapshot()
         } catch {
             if Self.shouldRetryPersistInOutbox(error) {
-                try EventOutboxStore.shared.enqueue(events: events, expectedVersion: workspaceVersion)
+                try EventOutboxStore.shared.enqueue(events: events)
                 return
             }
             throw error
@@ -395,7 +310,7 @@ final class AppState {
     }
 
     private func reconcileEventStream() {
-        if authState == .authenticated, workspaceKey != nil {
+        if authState == .authenticated {
             startEventStream()
         } else {
             stopEventStream()
@@ -423,7 +338,7 @@ final class AppState {
     }
 
     private var isEventStreamEligible: Bool {
-        authState == .authenticated && workspaceKey != nil
+        authState == .authenticated
     }
 
     private func debounceStreamCatchUp(remoteSeq: Int) {
@@ -699,7 +614,7 @@ final class AppState {
         WidgetCenter.shared.reloadAllTimelines()
     }
 
-    /// Persists a clinical `visit_note_added` event (E2EE payload) and updates local runtime state.
+    /// Persists a clinical `visit_note_added` event and updates local runtime state.
     func addVisitNote(dayDate: String, visitIndex: Int, text: String) async throws {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

@@ -17,15 +17,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   if (auth.status === 'anonymous') {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
-  if (auth.status === 'locked') {
-    return <Navigate to="/unlock" replace state={{ from: location.pathname }} />;
-  }
   return <>{children}</>;
 }
 
 export function PublicOnly({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
-  if (auth.status === 'unlocked') return <Navigate to="/" replace />;
-  if (auth.status === 'locked') return <Navigate to="/unlock" replace />;
+  if (auth.status === 'authenticated') return <Navigate to="/" replace />;
   return <>{children}</>;
 }
