@@ -24,7 +24,6 @@ function getUa(c: { req: { header: (n: string) => string | undefined } }): strin
 }
 
 admin.get('/users', async (c) => {
-  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const q = c.req.query('q')?.trim();
   const limit = Math.min(100, Math.max(1, Number(c.req.query('limit') ?? '50')));
   const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
@@ -78,18 +77,10 @@ admin.get('/users', async (c) => {
     });
   }
 
-  await logEvent({
-    action: 'admin_users_list',
-    userId: operatorId,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
-
   return c.json({ users: out });
 });
 
 admin.get('/users/:id', async (c) => {
-  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const id = c.req.param('id');
 
   const userRows = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -100,14 +91,6 @@ admin.get('/users/:id', async (c) => {
     .select()
     .from(tenantMembers)
     .where(eq(tenantMembers.userId, id));
-
-  await logEvent({
-    action: 'admin_user_detail',
-    userId: operatorId,
-    artifactId: id,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
 
   return c.json({
     id: u.id,
@@ -124,7 +107,6 @@ admin.get('/users/:id', async (c) => {
 });
 
 admin.get('/audit', async (c) => {
-  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const filterUserId = c.req.query('userId');
   const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '50')));
   const offset = Math.max(0, Number(c.req.query('offset') ?? '0'));
@@ -158,13 +140,6 @@ admin.get('/audit', async (c) => {
         .offset(offset)
     : await base.orderBy(desc(auditEvents.occurredAt)).limit(limit).offset(offset);
 
-  await logEvent({
-    action: 'admin_audit_list',
-    userId: operatorId,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
-
   return c.json({
     total,
     limit,
@@ -183,7 +158,6 @@ admin.get('/audit', async (c) => {
 });
 
 admin.get('/domain-events', async (c) => {
-  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const tenantId = c.req.query('tenantId')?.trim();
   const authorUserId = c.req.query('authorUserId')?.trim();
   const kindExact = c.req.query('kind')?.trim();
@@ -227,14 +201,6 @@ admin.get('/domain-events', async (c) => {
     ? await q.where(combined).orderBy(desc(domainEvents.serverReceivedAt)).limit(limit).offset(offset)
     : await q.orderBy(desc(domainEvents.serverReceivedAt)).limit(limit).offset(offset);
 
-  await logEvent({
-    action: 'admin_data_events_list',
-    userId: operatorId,
-    artifactId: tenantId ?? authorUserId ?? kindExact ?? (clientDataOnly ? 'client_data' : undefined),
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
-
   return c.json({
     total,
     limit,
@@ -257,7 +223,6 @@ admin.get('/domain-events', async (c) => {
 });
 
 admin.get('/domain-events/:id', async (c) => {
-  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const id = c.req.param('id');
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (!uuidRe.test(id)) return c.json({ error: 'Invalid id' }, 400);
@@ -289,14 +254,6 @@ admin.get('/domain-events/:id', async (c) => {
 
   const r = rows[0];
   if (!r) return c.json({ error: 'Not found' }, 404);
-
-  await logEvent({
-    action: 'admin_data_event_detail',
-    userId: operatorId,
-    artifactId: id,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
 
   const targetSeq = Number(r.seq);
   const payloadDiff = await computeDomainEventPayloadDiff({
@@ -331,7 +288,6 @@ admin.get('/domain-events/:id', async (c) => {
 });
 
 admin.get('/tenants/:tenantId/event-log', async (c) => {
-  const operatorId = (c as { get: (k: string) => unknown }).get('userId') as string;
   const tenantId = c.req.param('tenantId');
   const sinceSeq = Number(c.req.query('sinceSeq') ?? '0');
   const limit = Math.min(500, Math.max(1, Number(c.req.query('limit') ?? '100')));
@@ -351,14 +307,6 @@ admin.get('/tenants/:tenantId/event-log', async (c) => {
     .where(and(eq(domainEvents.tenantId, tenantId), gt(domainEvents.seq, sinceSeq)))
     .orderBy(asc(domainEvents.seq))
     .limit(limit);
-
-  await logEvent({
-    action: 'admin_event_log_list',
-    userId: operatorId,
-    artifactId: tenantId,
-    ip: getClientIp(c),
-    userAgent: getUa(c),
-  });
 
   return c.json({
     events: rows.map((row) => ({
