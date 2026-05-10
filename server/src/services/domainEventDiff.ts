@@ -30,11 +30,16 @@ function projectBeforeAfter(
   switch (kind) {
     case 'client_updated': {
       const id = (payload as { id?: string })?.id;
-      if (!id) return { before: null, after: payload };
-      return { before: before.clients.find((c) => c.id === id) ?? null, after: payload };
+      if (!id) return { before: null, after: null };
+      return {
+        before: before.clients.find((c) => c.id === id) ?? null,
+        after: after.clients.find((c) => c.id === id) ?? null,
+      };
     }
-    case 'client_added':
-      return { before: null, after: payload };
+    case 'client_added': {
+      const id = (payload as { id?: string })?.id;
+      return { before: null, after: id ? (after.clients.find((c) => c.id === id) ?? payload) : payload };
+    }
     case 'client_removed': {
       const id = (payload as { id?: string })?.id;
       if (!id) return { before: null, after: null };

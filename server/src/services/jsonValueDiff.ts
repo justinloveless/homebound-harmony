@@ -107,19 +107,9 @@ function diffArrays(before: unknown[], after: unknown[], basePath: string): Payl
     );
   }
 
-  if (before.length !== after.length) {
-    return [
-      {
-        path: basePath || '.',
-        kind: 'change',
-        before: `[array length ${before.length}]`,
-        after: `[array length ${after.length}]`,
-      },
-    ];
-  }
-
   const out: PayloadDiffEntry[] = [];
-  for (let i = 0; i < before.length; i++) {
+  const len = Math.max(before.length, after.length);
+  for (let i = 0; i < len; i++) {
     const p = `${basePath}[${i}]`;
     out.push(...diffJsonValues(before[i], after[i], p));
   }

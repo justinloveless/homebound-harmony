@@ -41,6 +41,14 @@ function serializeClient(
   cl: typeof clients.$inferSelect,
   windows: { day: string; startTime: string; endTime: string }[],
 ) {
+  const sortedWindows = [...windows].sort((a, b) => {
+    const day = a.day.localeCompare(b.day);
+    if (day !== 0) return day;
+    const start = a.startTime.localeCompare(b.startTime);
+    if (start !== 0) return start;
+    return a.endTime.localeCompare(b.endTime);
+  });
+
   return {
     id: cl.id,
     name: cl.name,
@@ -50,7 +58,7 @@ function serializeClient(
     visitsPerPeriod: cl.visitsPerPeriod,
     period: cl.period,
     priority: cl.priority,
-    timeWindows: windows.map((w) => ({ day: w.day, startTime: w.startTime, endTime: w.endTime })),
+    timeWindows: sortedWindows.map((w) => ({ day: w.day, startTime: w.startTime, endTime: w.endTime })),
     notes: cl.notes,
     excludedFromSchedule: cl.excludedFromSchedule,
   };
