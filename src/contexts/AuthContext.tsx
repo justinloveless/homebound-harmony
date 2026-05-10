@@ -1,5 +1,6 @@
 import React, { useCallback, useContext, useEffect, useState } from 'react';
 import { api, setActiveTenantId, ApiError } from '@/lib/api';
+import { parseTenantSlugFromHost } from '@/lib/tenantHost';
 
 export type AuthStatus = 'checking' | 'anonymous' | 'authenticated';
 
@@ -32,6 +33,13 @@ const AuthContext = React.createContext<AuthContextValue | null>(null);
 
 function pickDefaultTenant(tenants: TenantInfo[]): string | null {
   if (tenants.length === 0) return null;
+  if (typeof window !== 'undefined') {
+    const slug = parseTenantSlugFromHost(window.location.hostname);
+    if (slug) {
+      const match = tenants.find((t) => t.slug === slug);
+      if (match) return match.id;
+    }
+  }
   return tenants[0].id;
 }
 

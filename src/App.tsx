@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, Navigate } from 'react-router-dom';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -21,7 +21,7 @@ import AdminUserDetailPage from './pages/admin/AdminUserDetail';
 import AdminAuditPage from './pages/admin/AdminAudit';
 import WorkspaceTeamPage from './pages/WorkspaceTeam';
 
-function ProtectedShell() {
+function WorkspaceShell() {
   return (
     <AuthGuard>
       <WorkspaceProvider>
@@ -32,13 +32,25 @@ function ProtectedShell() {
             <Route path="/schedule" element={<Schedule />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/workspace/team" element={<WorkspaceTeamPage />} />
-            <Route path="/admin/users" element={<AdminUsersPage />} />
-            <Route path="/admin/users/:id" element={<AdminUserDetailPage />} />
-            <Route path="/admin/audit" element={<AdminAuditPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AppLayout>
       </WorkspaceProvider>
+    </AuthGuard>
+  );
+}
+
+function AdminShell() {
+  return (
+    <AuthGuard>
+      <AppLayout>
+        <Routes>
+          <Route path="users" element={<AdminUsersPage />} />
+          <Route path="users/:id" element={<AdminUserDetailPage />} />
+          <Route path="audit" element={<AdminAuditPage />} />
+          <Route path="*" element={<Navigate to="users" replace />} />
+        </Routes>
+      </AppLayout>
     </AuthGuard>
   );
 }
@@ -68,7 +80,8 @@ const App = () => (
                   </PublicOnly>
                 }
               />
-              <Route path="/*" element={<ProtectedShell />} />
+              <Route path="/admin/*" element={<AdminShell />} />
+              <Route path="/*" element={<WorkspaceShell />} />
             </Routes>
           </AppUpdateGate>
         </BrowserRouter>

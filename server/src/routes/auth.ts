@@ -10,6 +10,7 @@ import { isAdminEmail } from '../auth/admin';
 import { isMfaDisabledEmail } from '../auth/mfaBypass';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '../auth/cookie';
 import { logEvent } from '../services/audit';
+import { resolveRegistrationTenantFromHost } from '../services/tenantContext';
 import { and, eq, isNull } from 'drizzle-orm';
 
 const auth = new Hono();
@@ -57,24 +58,8 @@ function getClientIp(c: { req: { header: (n: string) => string | undefined } }):
     ?? 'unknown';
 }
 
-function slugFromEmail(email: string): string {
-  const local = email.split('@')[0]?.toLowerCase().replace(/[^a-z0-9-]/g, '-') ?? 'user';
-  const base = local.replace(/^-+|-+$/g, '').slice(0, 28);
-  return base || 'tenant';
-}
-
-async function allocateTenantSlug(email: string): Promise<string> {
-  const base = slugFromEmail(email);
-  for (let i = 0; i < 25; i++) {
-    const suffix = i === 0 ? '' : `-${Math.random().toString(36).slice(2, 8)}`;
-    const candidate = `${base}${suffix}`.slice(0, 48);
-    const hit = await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.slug, candidate)).limit(1);
-    if (!hit[0]) return candidate;
-  }
-  throw new Error('Could not allocate tenant slug');
-}
-
 // POST /api/auth/register — { email, password }
+// Must be called on a tenant subdomain (e.g. tenantx.APP_DOMAIN). Creates caregiver membership only.
 auth.post('/register', async (c) => {
   const body = await c.req.json().catch(() => null);
   if (!body) return c.json({ error: 'Invalid request' }, 400);
@@ -83,6 +68,24 @@ auth.post('/register', async (c) => {
   if (!email || !password) return c.json({ error: 'Missing fields' }, 400);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return c.json({ error: 'Invalid email' }, 400);
   if (password.length < 8) return c.json({ error: 'Password must be at least 8 characters' }, 400);
+
+  const resolved = await resolveRegistrationTenantFromHost(c);
+  if (resolved.status === 'apex') {
+    return c.json(
+      {
+        error:
+          'Registration must happen on a tenant subdomain (e.g. https://your-tenant.routecare.lovelesslabs.net/register). Ask your administrator to create the tenant first.',
+      },
+      400,
+    );
+  }
+  if (resolved.status === 'unknown_slug') {
+    return c.json(
+      { error: `No tenant exists for subdomain "${resolved.slug}". Ask your administrator to create it first.` },
+      404,
+    );
+  }
+  const { tenantId, tenantSlug } = resolved;
 
   const normalizedEmail = email.toLowerCase();
   const registerMfaDisabled = isMfaDisabledEmail(normalizedEmail);
@@ -101,31 +104,26 @@ auth.post('/register', async (c) => {
     })
     .returning({ id: users.id });
 
-  const slug = await allocateTenantSlug(normalizedEmail);
-  const displayName = slug.replace(/-/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
-
-  const [tenant] = await db
-    .insert(tenants)
-    .values({ slug, name: `${displayName} Clinic` })
-    .returning({ id: tenants.id });
-
   await db.insert(tenantMembers).values({
-    tenantId: tenant.id,
+    tenantId,
     userId: user.id,
-    role: 'admin',
+    role: 'caregiver',
   });
 
   await db.insert(workers).values({
-    tenantId: tenant.id,
+    tenantId,
     userId: user.id,
     name: '',
     homeAddress: '',
   });
 
-  await db.insert(tenantDomainChain).values({ tenantId: tenant.id, headSeq: 0 });
+  const chain = await db.select({ tenantId: tenantDomainChain.tenantId }).from(tenantDomainChain).where(eq(tenantDomainChain.tenantId, tenantId)).limit(1);
+  if (!chain[0]) {
+    await db.insert(tenantDomainChain).values({ tenantId, headSeq: 0 });
+  }
 
   const registrationToken = createRegToken(user.id);
-  return c.json({ registrationToken, mfaDisabled: registerMfaDisabled, tenantId: tenant.id, tenantSlug: slug }, 201);
+  return c.json({ registrationToken, mfaDisabled: registerMfaDisabled, tenantId, tenantSlug }, 201);
 });
 
 // POST /api/auth/totp/enroll

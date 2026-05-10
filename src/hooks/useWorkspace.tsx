@@ -135,7 +135,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const workspaceRef = useRef<Workspace>(DEFAULT_WORKSPACE);
 
-  const enabled = auth.status === 'authenticated';
+  const enabled =
+    auth.status === 'authenticated' &&
+    !!auth.activeTenantId &&
+    (auth.me?.tenants?.length ?? 0) > 0;
 
   const q = useQuery({
     queryKey: ['workspace', 'bundle'],

@@ -113,6 +113,7 @@ services:
       - app
     environment:
       VITE_API_PROXY_TARGET: http://app:3000
+      VITE_APP_DOMAIN: ${APP_DOMAIN:-routecare.lovelesslabs.net}
     # Container always serves on Vite's hard-coded 8080 (see vite.config.ts);
     # WEB_PORT picks the host-side port (default 5173 because 8080 frequently
     # collides with Hyper-V reservations on Windows hosts).
