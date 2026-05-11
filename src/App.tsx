@@ -20,6 +20,12 @@ import AdminUsersPage from './pages/admin/AdminUsers';
 import AdminUserDetailPage from './pages/admin/AdminUserDetail';
 import AdminAuditPage from './pages/admin/AdminAudit';
 import WorkspaceTeamPage from './pages/WorkspaceTeam';
+import CaregiverVisitView from './pages/CaregiverVisitView';
+import VisitDetailPage from './pages/VisitDetail';
+import AuthorizationsList from './pages/AuthorizationsList';
+import EvvPipelinePage from './pages/EvvPipelinePage';
+import BillingDashboard from './pages/BillingDashboard';
+import ClaimsList from './pages/ClaimsList';
 
 function WorkspaceShell() {
   return (
@@ -31,6 +37,12 @@ function WorkspaceShell() {
             <Route path="/clients" element={<Clients />} />
             <Route path="/schedule" element={<Schedule />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/visits" element={<CaregiverVisitView />} />
+            <Route path="/visits/:id" element={<VisitDetailPage />} />
+            <Route path="/authorizations" element={<AuthorizationsList />} />
+            <Route path="/evv/pipeline" element={<EvvPipelinePage />} />
+            <Route path="/billing" element={<BillingDashboard />} />
+            <Route path="/billing/claims" element={<ClaimsList />} />
             <Route path="/workspace/team" element={<WorkspaceTeamPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

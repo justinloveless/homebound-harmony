@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutGrid, Users, CalendarDays, Settings, LogOut, Shield, UserPlus } from 'lucide-react';
+import { LayoutGrid, Users, CalendarDays, Settings, LogOut, Shield, UserPlus, ClipboardCheck, FileCheck, Radio, DollarSign } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -21,10 +21,17 @@ import {
 
 const baseNavItems = [
   { to: '/', label: 'Workspace', icon: LayoutGrid },
+  { to: '/visits', label: 'Visits', icon: ClipboardCheck },
   { to: '/clients', label: 'Clients', icon: Users },
   { to: '/schedule', label: 'Schedule', icon: CalendarDays },
   { to: '/workspace/team', label: 'Team', icon: UserPlus },
   { to: '/settings', label: 'Settings', icon: Settings },
+];
+
+const adminNavItems = [
+  { to: '/authorizations', label: 'Authorizations', icon: FileCheck },
+  { to: '/evv/pipeline', label: 'EVV Pipeline', icon: Radio },
+  { to: '/billing', label: 'Billing', icon: DollarSign },
 ];
 
 function AppSidebar() {
@@ -36,6 +43,7 @@ function AppSidebar() {
   const navItems = auth.me?.isAdmin
     ? [
         ...baseNavItems,
+        ...adminNavItems,
         { to: '/admin/users', label: 'Admin', icon: Shield },
       ]
     : baseNavItems;
