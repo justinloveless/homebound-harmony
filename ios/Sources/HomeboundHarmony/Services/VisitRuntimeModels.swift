@@ -14,11 +14,18 @@ public struct VisitRuntimeState: Codable, Equatable {
     public var completedAt: Date?
     /// Visit-scoped notes from replayed `visit_note_added` events (not client profile notes).
     public var visitNote: String?
+    /// Server-assigned EVV visit UUID, populated after successful `POST /api/evv/check-in`.
+    public var evvVisitId: String?
+    /// Server-assigned note UUID from `POST /api/evv/{visitId}/notes`.
+    public var evvNoteId: String?
+    /// `"draft"` or `"signed"` — tracks note lifecycle for UI.
+    public var evvNoteStatus: String?
 
     public var isCompleted: Bool { completedAt != nil }
 
     enum CodingKeys: String, CodingKey {
         case visitKey, dayDate, visitIndex, clientId, checkedInAt, verifiedArrival, completedAt, visitNote
+        case evvVisitId, evvNoteId, evvNoteStatus
     }
 
     public init(
@@ -29,7 +36,10 @@ public struct VisitRuntimeState: Codable, Equatable {
         checkedInAt: Date,
         verifiedArrival: Bool,
         completedAt: Date?,
-        visitNote: String? = nil
+        visitNote: String? = nil,
+        evvVisitId: String? = nil,
+        evvNoteId: String? = nil,
+        evvNoteStatus: String? = nil
     ) {
         self.visitKey = visitKey
         self.dayDate = dayDate
@@ -39,6 +49,9 @@ public struct VisitRuntimeState: Codable, Equatable {
         self.verifiedArrival = verifiedArrival
         self.completedAt = completedAt
         self.visitNote = visitNote
+        self.evvVisitId = evvVisitId
+        self.evvNoteId = evvNoteId
+        self.evvNoteStatus = evvNoteStatus
     }
 
     public init(from decoder: Decoder) throws {
@@ -51,6 +64,9 @@ public struct VisitRuntimeState: Codable, Equatable {
         verifiedArrival = try c.decode(Bool.self, forKey: .verifiedArrival)
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
         visitNote = try c.decodeIfPresent(String.self, forKey: .visitNote)
+        evvVisitId = try c.decodeIfPresent(String.self, forKey: .evvVisitId)
+        evvNoteId = try c.decodeIfPresent(String.self, forKey: .evvNoteId)
+        evvNoteStatus = try c.decodeIfPresent(String.self, forKey: .evvNoteStatus)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -63,6 +79,9 @@ public struct VisitRuntimeState: Codable, Equatable {
         try c.encode(verifiedArrival, forKey: .verifiedArrival)
         try c.encodeIfPresent(completedAt, forKey: .completedAt)
         try c.encodeIfPresent(visitNote, forKey: .visitNote)
+        try c.encodeIfPresent(evvVisitId, forKey: .evvVisitId)
+        try c.encodeIfPresent(evvNoteId, forKey: .evvNoteId)
+        try c.encodeIfPresent(evvNoteStatus, forKey: .evvNoteStatus)
     }
 }
 

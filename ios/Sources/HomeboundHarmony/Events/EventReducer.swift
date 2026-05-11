@@ -121,7 +121,9 @@ enum EventReducer {
             return next
         case "workspace_imported":
             return try decodePayload(payload!)
-        case "share_create", "visit_started", "visit_completed", "visit_note_added":
+        case "share_create", "visit_started", "visit_completed", "visit_note_added",
+             "evv_check_in", "evv_check_out", "visit_note_submitted", "visit_note_signed",
+             "authorization_created", "authorization_updated", "evv_submission_result":
             return state
         default:
             return state
