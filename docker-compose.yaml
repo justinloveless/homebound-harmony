@@ -20,8 +20,11 @@
 # For a real deployment, set NODE_ENV=production behind TLS so __Host-session engages,
 # and replace the example secrets in .env.
 #
-# Coolify previews: if the preview URL returns 503 "no available server" while production
-# works, Traefik often has no loadbalancer port for the preview stack (Coolify bug; fixed
+# Coolify previews: `SERVICE_NAME_POSTGRES` resolves to Coolify's generated
+# Postgres service name for each preview stack (for example,
+# postgres-<uuid>-pr-7), so the app does not need a per-PR POSTGRES_HOST value.
+# If the preview URL returns 503 "no available server" while production works,
+# Traefik often has no loadbalancer port for the preview stack (Coolify bug; fixed
 # around v4 beta.455). Upgrade Coolify, and in the UI set the public `app` domain as
 # https://your-host:3000 so the proxy targets container port 3000. As a workaround you can
 # set env PORT=80 in Coolify and use a domain without :3000 so Traefik’s default :80
@@ -60,8 +63,8 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-app}
-      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@${POSTGRES_HOST:-${SERVICE_NAME_POSTGRES:-postgres}}:5432/${POSTGRES_DB:-app}
+      POSTGRES_HOST: ${POSTGRES_HOST:-${SERVICE_NAME_POSTGRES:-postgres}}
       # NODE_ENV=development keeps the cookie name plain `session` so plain
       # HTTP works locally. Switch to `production` (and front this with TLS)
       # for the __Host-session cookie.
