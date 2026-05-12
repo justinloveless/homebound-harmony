@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { api, ApiError } from '@/lib/api';
-import { APP_DOMAIN, getBrowserRegistrationHost } from '@/lib/tenantHost';
+import { buildTenantHostname, getBrowserRegistrationHost } from '@/lib/tenantHost';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -104,7 +104,7 @@ export default function RegisterPage() {
               <p>
                 Registration is only available on your clinic&apos;s subdomain, for example{' '}
                 <span className="font-mono text-xs text-foreground">
-                  https://your-clinic.{APP_DOMAIN}/register
+                  https://{buildTenantHostname('your-clinic')}/register
                 </span>
                 .
               </p>

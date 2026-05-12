@@ -26,6 +26,17 @@
 # https://your-host:3000 so the proxy targets container port 3000. As a workaround you can
 # set env PORT=80 in Coolify and use a domain without :3000 so Traefik’s default :80
 # backend matches (requires image user able to bind :80 — root in oven/bun is fine).
+#
+# Multi-tenant routing: production uses `<slug>.routecare.lovelesslabs.net` and needs a
+# wildcard DNS A record (`*.routecare.lovelesslabs.net`) plus a wildcard cert via DNS-01.
+# Coolify's "Domains" field with a wildcard emits an invalid `Host()` rule today
+# (https://github.com/coollabsio/coolify/issues/9623), so the wildcard must be added via
+# Traefik labels using `HostRegexp`. Coolify previews are single-label hostnames
+# (`pr-N-routecare.lovelesslabs.net`); to keep tenant URLs working there without per-PR
+# wildcard certs, slugs are *fused* into the same label with `--`, e.g.
+# `acme--pr-N-routecare.lovelesslabs.net`. The single zone-level wildcard
+# (`*.lovelesslabs.net`) and its cert cover that pattern. The Traefik router rule for
+# previews should match `^([a-z0-9-]+--)?<preview-host>$`.
 
 services:
   postgres:
@@ -83,6 +94,25 @@ services:
       # Review-account seed runs on boot by default (`RUN_SEED_ON_BOOT` unset); set to false to skip.
     expose:
       - "3000"
+    # Traefik routing for multi-tenant subdomains. Coolify auto-generates a
+    # router for the FQDN you configure in its UI (matching only that exact
+    # host); the labels below add a second router on the same service that
+    # also matches `<slug>.routecare.lovelesslabs.net` (production) and
+    # `<slug>--<previewId>-routecare.lovelesslabs.net` (Coolify previews).
+    # The single `*.lovelesslabs.net` wildcard cert in your zone covers all
+    # of these by SNI; Traefik picks it automatically — we don't need a
+    # certresolver here because the cert is already provisioned.
+    #
+    # Router name suffix `-${COOLIFY_RESOURCE_UUID}` keeps the name unique
+    # per Coolify resource (production vs each preview), avoiding clashes in
+    # Traefik's router table.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-tenants-${COOLIFY_RESOURCE_UUID:-default}.rule=HostRegexp(`^([a-z0-9-]+--)?routecare\\.lovelesslabs\\.net$$|^([a-z0-9-]+--)?[a-z0-9-]+-routecare\\.lovelesslabs\\.net$$`)"
+      - "traefik.http.routers.app-tenants-${COOLIFY_RESOURCE_UUID:-default}.entrypoints=https"
+      - "traefik.http.routers.app-tenants-${COOLIFY_RESOURCE_UUID:-default}.tls=true"
+      - "traefik.http.routers.app-tenants-${COOLIFY_RESOURCE_UUID:-default}.service=app-tenants-${COOLIFY_RESOURCE_UUID:-default}"
+      - "traefik.http.services.app-tenants-${COOLIFY_RESOURCE_UUID:-default}.loadbalancer.server.port=3000"
     healthcheck:
       test:
         [
