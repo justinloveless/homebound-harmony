@@ -10,7 +10,7 @@ import { isAdminEmail } from '../auth/admin';
 import { isMfaDisabledEmail } from '../auth/mfaBypass';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie } from '../auth/cookie';
 import { logEvent } from '../services/audit';
-import { resolveRegistrationTenantFromHost } from '../services/tenantContext';
+import { buildTenantHost, resolveRegistrationTenantFromHost } from '../services/tenantContext';
 import { and, eq, isNull } from 'drizzle-orm';
 
 const auth = new Hono();
@@ -59,7 +59,9 @@ function getClientIp(c: { req: { header: (n: string) => string | undefined } }):
 }
 
 // POST /api/auth/register — { email, password }
-// Must be called on a tenant subdomain (e.g. tenantx.APP_DOMAIN). Creates caregiver membership only.
+// Must be called on a tenant subdomain (e.g. tenantx.APP_DOMAIN, or
+// tenantx--pr-N-routecare.lovelesslabs.net on a Coolify preview). Creates
+// caregiver membership only.
 auth.post('/register', async (c) => {
   const body = await c.req.json().catch(() => null);
   if (!body) return c.json({ error: 'Invalid request' }, 400);
@@ -71,10 +73,10 @@ auth.post('/register', async (c) => {
 
   const resolved = await resolveRegistrationTenantFromHost(c);
   if (resolved.status === 'apex') {
+    const exampleHost = buildTenantHost('your-tenant', c.req.header('host') ?? '');
     return c.json(
       {
-        error:
-          'Registration must happen on a tenant subdomain (e.g. https://your-tenant.routecare.lovelesslabs.net/register). Ask your administrator to create the tenant first.',
+        error: `Registration must happen on a tenant subdomain (e.g. https://${exampleHost}/register). Ask your administrator to create the tenant first.`,
       },
       400,
     );

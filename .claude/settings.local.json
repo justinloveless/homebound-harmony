@@ -6,7 +6,9 @@
       "Bash(Sort-Object)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\Justin\\\\Documents\\\\Code\\\\homebound-harmony\" -Force)",
       "Bash(Select-Object Name, PSIsContainer)",
-      "Bash(Format-Table -AutoSize)"
+      "Bash(Format-Table -AutoSize)",
+      "Bash(bun run *)",
+      "Bash(find \"C:/Users/Justin/Documents/Code/homebound-harmony/server/drizzle\" -type f 2>/dev/null | head -30)"
     ]
   }
 }

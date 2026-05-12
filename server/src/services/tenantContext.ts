@@ -13,15 +13,77 @@ export type ResolvedTenant = {
 
 export const APP_DOMAIN = process.env.APP_DOMAIN ?? 'routecare.lovelesslabs.net';
 
+/**
+ * Separator between tenant slug and Coolify preview suffix when a tenant slug
+ * is fused into a preview hostname (single-label workaround for nested
+ * wildcard DNS / cert limitations).
+ *
+ *   production tenant: `<slug>.routecare.lovelesslabs.net`
+ *   preview apex:      `pr-3-routecare.lovelesslabs.net`
+ *   preview tenant:    `<slug>--pr-3-routecare.lovelesslabs.net`
+ */
+const PREVIEW_TENANT_SEPARATOR = '--';
+
+/**
+ * Extract the tenant slug from `host`. Handles both the canonical
+ * `<slug>.APP_DOMAIN` form and the Coolify preview form where the preview ID
+ * and APP_DOMAIN's first label are fused into a single DNS label
+ * (`<slug>--pr-N-routecare.lovelesslabs.net`). Returns null for apex hosts,
+ * preview-apex hosts, and anything that doesn't belong to APP_DOMAIN's zone.
+ */
 function parseSubdomain(host: string, appDomain: string): string | null {
   const h = host.split(':')[0]?.toLowerCase() ?? '';
   const d = appDomain.toLowerCase();
   if (h === d || h === `www.${d}`) return null;
+
   if (h.endsWith(`.${d}`)) {
     const sub = h.slice(0, -(d.length + 1));
-    if (sub && !sub.includes('.')) return sub;
+    if (!sub || sub.includes('.')) return null;
+    const sep = sub.indexOf(PREVIEW_TENANT_SEPARATOR);
+    return sep > 0 ? sub.slice(0, sep) : sub;
   }
+
+  const dot = d.indexOf('.');
+  if (dot > 0) {
+    const firstLabel = d.slice(0, dot);
+    const parent = d.slice(dot + 1);
+    const previewSuffix = `-${firstLabel}.${parent}`;
+    if (h.endsWith(previewSuffix)) {
+      const previewLabel = h.slice(0, -previewSuffix.length);
+      if (previewLabel && !previewLabel.includes('.')) {
+        const sep = previewLabel.indexOf(PREVIEW_TENANT_SEPARATOR);
+        if (sep > 0) return previewLabel.slice(0, sep);
+      }
+    }
+  }
+
   return null;
+}
+
+/**
+ * Build the tenant hostname appropriate for the current request, mirroring
+ * production vs. preview deployments. On production it returns
+ * `<slug>.routecare.lovelesslabs.net`; on a preview it returns
+ * `<slug>--pr-N-routecare.lovelesslabs.net`.
+ */
+export function buildTenantHost(slug: string, requestHost: string, appDomain: string = APP_DOMAIN): string {
+  const h = requestHost.split(':')[0]?.toLowerCase() ?? '';
+  const d = appDomain.toLowerCase();
+  const dot = d.indexOf('.');
+  if (dot > 0) {
+    const firstLabel = d.slice(0, dot);
+    const parent = d.slice(dot + 1);
+    const previewSuffix = `-${firstLabel}.${parent}`;
+    if (h.endsWith(previewSuffix)) {
+      const previewLabel = h.slice(0, -previewSuffix.length);
+      if (previewLabel && !previewLabel.includes('.')) {
+        const sep = previewLabel.indexOf(PREVIEW_TENANT_SEPARATOR);
+        const previewId = sep > 0 ? previewLabel.slice(sep + PREVIEW_TENANT_SEPARATOR.length) : previewLabel;
+        return `${slug}${PREVIEW_TENANT_SEPARATOR}${previewId}-${firstLabel}.${parent}`;
+      }
+    }
+  }
+  return `${slug}.${appDomain}`;
 }
 
 export type RegistrationHostResolution =

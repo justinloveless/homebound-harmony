@@ -179,8 +179,6 @@ struct VisitCard: View {
     @State private var checkInError: String?
     @State private var showOutsideRadiusConfirm = false
     @State private var showVisitNoteSheet = false
-    @State private var visitNoteDraft = ""
-    @State private var visitNoteError: String?
 
     private var runtimeState: VisitRuntimeState? {
         appState.visitRuntimeState(dayDate: dayDate, visitIndex: visitIndex)
@@ -272,6 +270,24 @@ struct VisitCard: View {
                                 .font(.subheadline)
                         }
                     }
+
+                    HStack(spacing: 4) {
+                        if runtimeState.evvVisitId != nil {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                            Text("EVV synced")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Text("EVV pending")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
                 }
 
                 // Notes (expandable)
@@ -320,11 +336,10 @@ struct VisitCard: View {
                     Spacer()
                     if runtimeState != nil {
                         Button {
-                            visitNoteDraft = ""
-                            visitNoteError = nil
                             showVisitNoteSheet = true
                         } label: {
-                            Text("Add note")
+                            let noteLabel = runtimeState?.evvNoteStatus == "signed" ? "View Note" : "Visit Note"
+                            Text(runtimeState?.evvVisitId == nil ? "Syncing…" : noteLabel)
                                 .font(.caption.weight(.semibold))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
@@ -333,6 +348,7 @@ struct VisitCard: View {
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .disabled(runtimeState?.evvVisitId == nil)
                         Button {
                             appState.uncheckInVisit(dayDate: dayDate, visitIndex: visitIndex)
                         } label: {
@@ -390,47 +406,14 @@ struct VisitCard: View {
             Text("You appear to be away from the client location.")
         }
         .sheet(isPresented: $showVisitNoteSheet) {
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Add a note for this visit. It is saved to your visit audit log.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    TextEditor(text: $visitNoteDraft)
-                        .frame(minHeight: 120)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(.separator)))
-                    if let visitNoteError {
-                        Text(visitNoteError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-                .padding()
-                .navigationTitle("Visit note")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { showVisitNoteSheet = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            Task {
-                                visitNoteError = nil
-                                do {
-                                    try await appState.addVisitNote(
-                                        dayDate: dayDate,
-                                        visitIndex: visitIndex,
-                                        text: visitNoteDraft
-                                    )
-                                    showVisitNoteSheet = false
-                                } catch {
-                                    visitNoteError = error.localizedDescription
-                                }
-                            }
-                        }
-                    }
-                }
+            if let evvVisitId = runtimeState?.evvVisitId {
+                VisitNoteFormView(
+                    evvVisitId: evvVisitId,
+                    dayDate: dayDate,
+                    visitIndex: visitIndex
+                )
+                .presentationDetents([.large])
             }
-            .presentationDetents([.medium, .large])
         }
     }
 

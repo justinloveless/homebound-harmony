@@ -105,6 +105,45 @@ enum VisitRuntimeReplayer {
                     )
                 }
 
+            case "evv_check_in":
+                guard let dayDate = payload["dayDate"] as? String,
+                      let visitIndex = intValue(payload["visitIndex"]),
+                      let clientId = payload["clientId"] as? String,
+                      let evvVisitId = payload["evvVisitId"] as? String else { continue }
+                let claimedAt = (ev["claimedAt"] as? String).flatMap { parseInstant($0) } ?? Date()
+                let key = VisitKey.make(dayDate: dayDate, visitIndex: visitIndex)
+                let prior = byKey[key]
+                var state = VisitRuntimeState(
+                    visitKey: key,
+                    dayDate: dayDate,
+                    visitIndex: visitIndex,
+                    clientId: clientId,
+                    checkedInAt: claimedAt,
+                    verifiedArrival: true,
+                    completedAt: prior?.completedAt,
+                    visitNote: prior?.visitNote
+                )
+                state.evvVisitId = evvVisitId
+                byKey[key] = state
+
+            case "evv_check_out":
+                guard let evvVisitId = payload["evvVisitId"] as? String else { continue }
+                let dayDate = payload["dayDate"] as? String
+                let visitIndex = intValue(payload["visitIndex"])
+                let completedAt = (ev["claimedAt"] as? String).flatMap { parseInstant($0) } ?? Date()
+
+                if let dayDate, let visitIndex {
+                    let key = VisitKey.make(dayDate: dayDate, visitIndex: visitIndex)
+                    if var existing = byKey[key] {
+                        existing.completedAt = completedAt
+                        byKey[key] = existing
+                    }
+                } else {
+                    if let key = byKey.first(where: { $0.value.evvVisitId == evvVisitId })?.key {
+                        byKey[key]?.completedAt = completedAt
+                    }
+                }
+
             default:
                 break
             }

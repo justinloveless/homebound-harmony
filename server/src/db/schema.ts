@@ -40,6 +40,10 @@ export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
   slug: text('slug').unique().notNull(),
   name: text('name').notNull(),
+  evvVendorId: text('evv_vendor_id').notNull().default(''),
+  evvApiKeyEncrypted: text('evv_api_key_encrypted'),
+  billingConfig: jsonb('billing_config').notNull().default({}),
+  defaultServiceCode: text('default_service_code').notNull().default('T1019'),
   createdAt: tstz('created_at').defaultNow().notNull(),
   updatedAt: tstz('updated_at').defaultNow().notNull(),
 });
@@ -72,6 +76,8 @@ export const workers = pgTable(
       .notNull(),
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
     name: text('name').notNull().default(''),
+    npi: text('npi').notNull().default(''),
+    employeeId: text('employee_id').notNull().default(''),
     homeAddress: text('home_address').notNull().default(''),
     homeLat: doublePrecision('home_lat'),
     homeLon: doublePrecision('home_lon'),
@@ -109,6 +115,8 @@ export const clients = pgTable(
       .references(() => tenants.id, { onDelete: 'cascade' })
       .notNull(),
     name: text('name').notNull().default(''),
+    medicaidId: text('medicaid_id').notNull().default(''),
+    payerMemberId: text('payer_member_id').notNull().default(''),
     address: text('address').notNull().default(''),
     lat: doublePrecision('lat'),
     lon: doublePrecision('lon'),
@@ -256,3 +264,170 @@ export const auditEvents = pgTable('audit_events', {
   userAgent: text('user_agent'),
   occurredAt: tstz('occurred_at').defaultNow().notNull(),
 });
+
+export const evvVisits = pgTable(
+  'evv_visits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    clientId: uuid('client_id')
+      .references(() => clients.id, { onDelete: 'cascade' })
+      .notNull(),
+    workerId: uuid('worker_id')
+      .references(() => workers.id, { onDelete: 'cascade' })
+      .notNull(),
+    authorizationId: uuid('authorization_id'),
+    scheduleVisitId: uuid('schedule_visit_id').references(() => scheduleVisits.id, { onDelete: 'set null' }),
+    checkInAt: tstz('check_in_at').notNull(),
+    checkOutAt: tstz('check_out_at'),
+    checkInLat: doublePrecision('check_in_lat').notNull(),
+    checkInLon: doublePrecision('check_in_lon').notNull(),
+    checkInAccuracyM: real('check_in_accuracy_m').notNull(),
+    checkOutLat: doublePrecision('check_out_lat'),
+    checkOutLon: doublePrecision('check_out_lon'),
+    checkOutAccuracyM: real('check_out_accuracy_m'),
+    verificationMethod: text('verification_method').notNull().default('gps'),
+    serviceCode: text('service_code'),
+    durationMinutes: integer('duration_minutes'),
+    billableUnits: integer('billable_units'),
+    visitStatus: text('visit_status').notNull().default('in_progress'),
+    evvStatus: text('evv_status').notNull().default('pending'),
+    evvRejectionReason: text('evv_rejection_reason'),
+    evvSubmittedAt: tstz('evv_submitted_at'),
+    evvResponseAt: tstz('evv_response_at'),
+    evvExternalId: text('evv_external_id'),
+    noteStatus: text('note_status').notNull().default('pending'),
+    isBillable: boolean('is_billable').notNull().default(false),
+    billingIssues: jsonb('billing_issues').notNull().default([]),
+    claimBatchId: uuid('claim_batch_id'),
+    claimedAt: tstz('claimed_at'),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+    updatedAt: tstz('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    tenantStatusIdx: index('evv_visits_tenant_status_idx').on(t.tenantId, t.visitStatus),
+    tenantEvvStatusIdx: index('evv_visits_tenant_evv_status_idx').on(t.tenantId, t.evvStatus),
+    tenantBillableIdx: index('evv_visits_tenant_billable_idx').on(t.tenantId, t.isBillable),
+    tenantWorkerStatusIdx: index('evv_visits_tenant_worker_status_idx').on(t.tenantId, t.workerId, t.visitStatus),
+    tenantClientIdx: index('evv_visits_tenant_client_idx').on(t.tenantId, t.clientId),
+  }),
+);
+
+export const visitNotes = pgTable(
+  'visit_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    evvVisitId: uuid('evv_visit_id')
+      .references(() => evvVisits.id, { onDelete: 'cascade' })
+      .notNull(),
+    version: integer('version').notNull().default(1),
+    authorUserId: uuid('author_user_id').references(() => users.id, { onDelete: 'set null' }),
+    tasksCompleted: jsonb('tasks_completed').notNull().default([]),
+    freeText: text('free_text').notNull().default(''),
+    caregiverSignature: text('caregiver_signature'),
+    signedAt: tstz('signed_at'),
+    submittedAt: tstz('submitted_at'),
+    isFinal: boolean('is_final').notNull().default(false),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    visitVersionUniq: uniqueIndex('visit_notes_visit_version_unique').on(t.evvVisitId, t.version),
+    visitIdx: index('visit_notes_visit_id_idx').on(t.evvVisitId),
+  }),
+);
+
+export const taskTemplates = pgTable(
+  'task_templates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    label: text('label').notNull(),
+    category: text('category').notNull().default('general'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    tenantIdx: index('task_templates_tenant_id_idx').on(t.tenantId),
+  }),
+);
+
+export const evvSubmissionQueue = pgTable(
+  'evv_submission_queue',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    evvVisitId: uuid('evv_visit_id')
+      .references(() => evvVisits.id, { onDelete: 'cascade' })
+      .notNull()
+      .unique(),
+    payload: jsonb('payload').notNull().default({}),
+    status: text('status').notNull().default('pending'), // pending | processing | submitted | rejected | dead_letter | retrying
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(5),
+    lastAttemptAt: tstz('last_attempt_at'),
+    nextRetryAt: tstz('next_retry_at'),
+    errorMessage: text('error_message'),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    tenantIdx: index('evv_submission_queue_tenant_idx').on(t.tenantId),
+    statusIdx: index('evv_submission_queue_status_idx').on(t.status),
+    nextRetryIdx: index('evv_submission_queue_next_retry_idx').on(t.nextRetryAt),
+  }),
+);
+
+export const claimBatches = pgTable(
+  'claim_batches',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    generatedBy: uuid('generated_by').references(() => users.id, { onDelete: 'set null' }),
+    visitCount: integer('visit_count').notNull().default(0),
+    totalUnits: integer('total_units').notNull().default(0),
+    dateRangeStart: date('date_range_start', { mode: 'string' }).notNull(),
+    dateRangeEnd: date('date_range_end', { mode: 'string' }).notNull(),
+    csvContent: text('csv_content').notNull().default(''),
+    status: text('status').notNull().default('generated'),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    tenantIdx: index('claim_batches_tenant_id_idx').on(t.tenantId),
+  }),
+);
+
+export const serviceAuthorizations = pgTable(
+  'service_authorizations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    clientId: uuid('client_id')
+      .references(() => clients.id, { onDelete: 'cascade' })
+      .notNull(),
+    serviceCode: text('service_code').notNull(),
+    payerName: text('payer_name').notNull().default(''),
+    payerId: text('payer_id').notNull().default(''),
+    unitsAuthorized: integer('units_authorized').notNull(),
+    unitsUsed: integer('units_used').notNull().default(0),
+    startDate: date('start_date', { mode: 'string' }).notNull(),
+    endDate: date('end_date', { mode: 'string' }).notNull(),
+    status: text('status').notNull().default('active'),
+    createdAt: tstz('created_at').defaultNow().notNull(),
+    updatedAt: tstz('updated_at').defaultNow().notNull(),
+  },
+  (t) => ({
+    tenantIdx: index('service_authorizations_tenant_id_idx').on(t.tenantId),
+    tenantClientIdx: index('service_authorizations_tenant_client_idx').on(t.tenantId, t.clientId),
+    tenantStatusIdx: index('service_authorizations_tenant_status_idx').on(t.tenantId, t.status),
+  }),
+);

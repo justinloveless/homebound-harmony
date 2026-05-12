@@ -14,6 +14,11 @@ import { schedulesRouter } from './routes/schedules';
 import { visitsRouter } from './routes/visits';
 import { travelTimesRouter } from './routes/travelTimes';
 import { tenantsRouter } from './routes/tenants';
+import { evvRouter } from './routes/evv';
+import { taskTemplatesRouter } from './routes/taskTemplates';
+import { authorizationsRouter } from './routes/authorizations';
+import { billingRouter } from './routes/billing';
+import { startEvvSubmissionWorker } from './services/evvSubmissionWorker';
 import { adminAllowlistSize } from './auth/admin';
 import { runMigrations } from './db/migrate';
 import { resolveDatabaseUrl } from './db/connection';
@@ -61,6 +66,10 @@ app.route('/api/schedules', schedulesRouter);
 app.route('/api/visits', visitsRouter);
 app.route('/api/travel-times', travelTimesRouter);
 app.route('/api/tenant', tenantsRouter);
+app.route('/api/evv', evvRouter);
+app.route('/api/task-templates', taskTemplatesRouter);
+app.route('/api/authorizations', authorizationsRouter);
+app.route('/api/billing', billingRouter);
 
 const PUBLIC_DIR = path.resolve(process.env.PUBLIC_DIR ?? './public');
 
@@ -196,6 +205,8 @@ if (process.env.RUN_SEED_ON_BOOT !== 'false') {
 
 console.log(`Listening on http://0.0.0.0:${port}`);
 console.log(`ADMIN_EMAILS allowlist: ${adminAllowlistSize()} entr(y/ies) (set ADMIN_EMAILS=comma@emails)`);
+
+startEvvSubmissionWorker();
 
 export default {
   port,

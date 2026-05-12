@@ -144,7 +144,10 @@ final class SyncService {
 
     // MARK: - Domain events (visit replay)
 
-    private static let visitKinds: Set<String> = ["visit_started", "visit_completed", "visit_note_added"]
+    private static let visitKinds: Set<String> = [
+        "visit_started", "visit_completed", "visit_note_added",
+        "evv_check_in", "evv_check_out", "visit_note_submitted", "visit_note_signed",
+    ]
 
     private func fetchAllVisitReplayEvents() async throws -> (maxSeq: Int, dicts: [[String: Any]]) {
         var since = 0
@@ -167,7 +170,9 @@ final class SyncService {
                 }
                 guard let kind = row["kind"] as? String, Self.visitKinds.contains(kind) else { continue }
                 guard let payload = row["payload"] as? [String: Any] else { continue }
-                visitRows.append(["kind": kind, "payload": payload])
+                var wire: [String: Any] = ["kind": kind, "payload": payload]
+                if let claimedAt = row["claimedAt"] { wire["claimedAt"] = claimedAt }
+                visitRows.append(wire)
             }
 
             if events.count < 500 { break }
@@ -181,7 +186,9 @@ final class SyncService {
     private func buildPlainWireRow(event: [String: Any]) throws -> [String: Any] {
         let kind = event["kind"] as? String ?? ""
         let clinical = [
-            "client_added", "client_updated", "client_removed", "visit_started", "visit_completed", "visit_note_added",
+            "client_added", "client_updated", "client_removed",
+            "visit_started", "visit_completed", "visit_note_added",
+            "evv_check_in", "evv_check_out", "visit_note_submitted", "visit_note_signed",
         ].contains(kind)
         guard let clientEventId = event["clientEventId"] as? String, !clientEventId.isEmpty else {
             throw SyncError.badEventResponse

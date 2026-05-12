@@ -34,7 +34,14 @@ export type EventKind =
   | 'share_create'
   | 'visit_started'
   | 'visit_completed'
-  | 'visit_note_added';
+  | 'visit_note_added'
+  | 'evv_check_in'
+  | 'evv_check_out'
+  | 'visit_note_submitted'
+  | 'visit_note_signed'
+  | 'authorization_created'
+  | 'authorization_updated'
+  | 'evv_submission_result';
 
 export type EventPayloadMap = {
   worker_updated: WorkerProfile;
@@ -72,6 +79,46 @@ export type EventPayloadMap = {
     clientId: string;
     note: string;
   };
+  evv_check_in: {
+    evvVisitId: string;
+    clientId: string;
+    scheduleVisitId?: string;
+    verificationMethod: 'gps' | 'telephony' | 'biometric';
+  };
+  evv_check_out: {
+    evvVisitId: string;
+    clientId: string;
+    durationMinutes: number;
+    billableUnits: number;
+  };
+  visit_note_submitted: {
+    evvVisitId: string;
+    noteId: string;
+    version: number;
+  };
+  visit_note_signed: {
+    evvVisitId: string;
+    noteId: string;
+    signedAt: string;
+  };
+  authorization_created: {
+    authorizationId: string;
+    clientId: string;
+    serviceCode: string;
+    unitsAuthorized: number;
+    startDate: string;
+    endDate: string;
+  };
+  authorization_updated: {
+    authorizationId: string;
+    changes: Record<string, unknown>;
+  };
+  evv_submission_result: {
+    evvVisitId: string;
+    accepted: boolean;
+    externalId?: string;
+    rejectionReason?: string;
+  };
 };
 
 type EventBase = { clientEventId: string; claimedAt: string; gps?: EventGps };
@@ -94,7 +141,14 @@ export type Event =
   | (EventBase & { kind: 'share_create'; payload: EventPayloadMap['share_create'] })
   | (EventBase & { kind: 'visit_started'; payload: EventPayloadMap['visit_started'] })
   | (EventBase & { kind: 'visit_completed'; payload: EventPayloadMap['visit_completed'] })
-  | (EventBase & { kind: 'visit_note_added'; payload: EventPayloadMap['visit_note_added'] });
+  | (EventBase & { kind: 'visit_note_added'; payload: EventPayloadMap['visit_note_added'] })
+  | (EventBase & { kind: 'evv_check_in'; payload: EventPayloadMap['evv_check_in'] })
+  | (EventBase & { kind: 'evv_check_out'; payload: EventPayloadMap['evv_check_out'] })
+  | (EventBase & { kind: 'visit_note_submitted'; payload: EventPayloadMap['visit_note_submitted'] })
+  | (EventBase & { kind: 'visit_note_signed'; payload: EventPayloadMap['visit_note_signed'] })
+  | (EventBase & { kind: 'authorization_created'; payload: EventPayloadMap['authorization_created'] })
+  | (EventBase & { kind: 'authorization_updated'; payload: EventPayloadMap['authorization_updated'] })
+  | (EventBase & { kind: 'evv_submission_result'; payload: EventPayloadMap['evv_submission_result'] });
 
 export const CLINICAL_KINDS = new Set<EventKind>([
   'client_added',
@@ -104,6 +158,9 @@ export const CLINICAL_KINDS = new Set<EventKind>([
   'visit_started',
   'visit_completed',
   'visit_note_added',
+  'evv_check_in',
+  'evv_check_out',
+  'visit_note_signed',
 ]);
 
 export function isClinicalKind(kind: EventKind): boolean {
